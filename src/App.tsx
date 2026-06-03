@@ -261,7 +261,7 @@ export default function App(){
   ];
   const rBgs=["#e6f4ea","#e6f4ea","#fef7e0","#fce8e6","#fce8e6"];
   const rFgs=["#34a853","#34a853","#f29900","#ea4335","#c5221f"];
-  const rLbls=["매우 좋음","좋음","보통","힘듦","매우 힘듦"];
+  const rLbls=["매우 힘듦","힘듦","보통","좋음","매우 좋음"];
 
   const LogoBox=({size=36,fs=18})=>(
     <div style={{width:size,height:size,background:PC.primary,borderRadius:size*0.28,display:"flex",alignItems:"center",justifyContent:"center",fontSize:fs}}>🚔</div>
