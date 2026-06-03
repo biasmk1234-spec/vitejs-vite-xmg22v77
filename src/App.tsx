@@ -260,7 +260,7 @@ export default function App(){
     {key:"i_trigger",label:"방아쇠당기기 체감 강도는?"},
   ];
   const rBgs=["#e6f4ea","#e6f4ea","#fef7e0","#fce8e6","#fce8e6"];
-const rFgs=["#34a853","#34a853","#f29900","#ea4335","#c5221f"];
+  const rFgs=["#34a853","#34a853","#f29900","#ea4335","#c5221f"];
   const rLbls=["매우 힘듦","힘듦","보통","좋음","매우 좋음"];
 
   const LogoBox=({size=36,fs=18})=>(
