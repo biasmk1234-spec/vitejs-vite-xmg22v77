@@ -98,23 +98,39 @@ function RecordCard({h,prev}:{h:any,prev:any}){
         </div>
       </div>
 
-      {/* 장애물 랩 */}
-      {obs.length>0&&(
-        <div style={{marginBottom:8}}>
-          <div style={{fontSize:12,fontWeight:600,color:PC.textSub,marginBottom:4}}>🏃 장애물달리기</div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {obs.map((lap:number,i:number)=>{
-              const prev_lap=i>0?obs[i-1]:0;
-              const interval=lap-prev_lap;
-              return(
-                <span key={i} style={{fontSize:11,background:PC.borderLight,borderRadius:6,padding:"2px 7px",color:PC.textSub}}>
-                  {i+1}R {secToDisplay(interval)} <span style={{color:PC.textLight}}>({secToDisplay(lap)})</span>
-                </span>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* 장애물 랩 또는 times.obstacle */}
+      {(() => {
+        const obs:number[]=h.obstacle_laps||[];
+        const obsTotalFromTimes=h.times?.obstacle||0;
+        if(obs.length>0&&obs[obs.length-1]>0){
+          return(
+            <div style={{marginBottom:8}}>
+              <div style={{fontSize:12,fontWeight:600,color:PC.textSub,marginBottom:4}}>🏃 장애물달리기</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {obs.map((lap:number,i:number)=>{
+                  const prev_lap=i>0?obs[i-1]:0;
+                  const interval=lap-prev_lap;
+                  return(
+                    <span key={i} style={{fontSize:11,background:PC.borderLight,borderRadius:6,padding:"2px 7px",color:PC.textSub}}>
+                      {i+1}R {secToDisplay(interval)} <span style={{color:PC.textLight}}>({secToDisplay(lap)})</span>
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        } else if(obsTotalFromTimes>0){
+          const diff=obsTotalFromTimes-160;
+          const db=dBdg(diff);
+          return(
+            <span style={{fontSize:12,display:"inline-flex",alignItems:"center",gap:4,marginBottom:6}}>
+              🏃 <span style={{color:PC.textSub}}>{secToDisplay(obsTotalFromTimes)}</span>
+              {db&&diff!==0&&<span style={{color:db.fg}}>({diff>0?`+${diff}`:diff}초)</span>}
+            </span>
+          );
+        }
+        return null;
+      })()}
 
       {/* IN/OUT 코스별 소요시간 — 신규/구형 데이터 모두 지원 */}
       {(() => {
@@ -174,10 +190,11 @@ function HistoryList({records}:{records:any[]}){
               <tr>
                 <td style={{padding:"6px 8px",color:PC.textSub,whiteSpace:"nowrap"}}>🏃 장애물(총)</td>
                 {sorted.map((h,i)=>{
-                  const val=h.obstacle_laps?.at(-1)||0;
-                  const prev=sorted[i+1]?.obstacle_laps?.at(-1)||null;
-                  const cb=cBdg(prev!==null?val-prev:null);
-                  return <td key={h.id} style={{textAlign:"right",padding:"6px 8px",whiteSpace:"nowrap"}}>{secToDisplay(val)}{cb&&<span style={{marginLeft:3,fontSize:11,color:cb.fg}}>{cb.txt}</span>}</td>;
+                  const val=h.obstacle_laps?.at(-1)||h.times?.obstacle||0;
+                  const prev=sorted[i+1];
+                  const prevVal=prev?(prev.obstacle_laps?.at(-1)||prev.times?.obstacle||0):null;
+                  const cb=cBdg(prevVal!==null?val-prevVal:null);
+                  return <td key={h.id} style={{textAlign:"right",padding:"6px 8px",whiteSpace:"nowrap"}}>{val?secToDisplay(val):"-"}{cb&&val?<span style={{marginLeft:3,fontSize:11,color:cb.fg}}>{cb.txt}</span>:null}</td>;
                 })}
               </tr>
               {INOUT_COURSES.map(c=>(
