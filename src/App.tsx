@@ -357,15 +357,19 @@ export default function App(){
       ratings, memo,
     };
     await dbPost("records",body);
-    setMyHist(h=>[{...body,id:Date.now()},...h]);
-    setSubmitted({...body,id:Date.now()});
+    const newEntry={...body,id:Date.now()};
+    setMyHist(h=>[newEntry,...h]);
+    setSubmitted(newEntry);
     setLoading(false);
   }
 
   function resetForm(){
     setLaps(Array(6).fill(null).map(()=>({m:"",s:""})));
     setInout(Object.fromEntries(INOUT_COURSES.map(c=>[c.id,{inM:"",inS:"",outM:"",outS:""}])));
-    setTotalM("");setTotalS("");setRatings({});setMemo("");setSubmitted(null);setRecDate(todayISO());
+    setTotalM("");setTotalS("");setRatings({});setMemo("");
+    setSubmitted(null);
+    setRecDate(todayISO());
+    setTab("record");
   }
 
   const stuNames=[...new Set(allHist.map((h:any)=>h.student_name))];
