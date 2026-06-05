@@ -366,10 +366,9 @@ export default function App(){
   function resetForm(){
     setLaps(Array(6).fill(null).map(()=>({m:"",s:""})));
     setInout(Object.fromEntries(INOUT_COURSES.map(c=>[c.id,{inM:"",inS:"",outM:"",outS:""}])));
-    setTotalM("");setTotalS("");setRatings({});setMemo("");
+    setRatings({});setMemo("");
     setSubmitted(null);
     setRecDate(todayISO());
-    setTab("record");
   }
 
   const stuNames=[...new Set(allHist.map((h:any)=>h.student_name))];
