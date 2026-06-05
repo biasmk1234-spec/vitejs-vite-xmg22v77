@@ -234,17 +234,38 @@ export default function App(){
   };
   const hasInout=(id:string)=>{const o=inout[id]; return hasMSValue(o.inM,o.inS)||hasMSValue(o.outM,o.outS);};
 
-  // 총시간 입력
-  const [totalM,setTotalM]=useState("");
-  const [totalS,setTotalS]=useState("");
-  const hasTotalTime=totalM!==""||totalS!=="";
-  const totalTimeSec=toSec(totalM,totalS);
-
   // 코스별 합산
   const inoutSum=INOUT_COURSES.reduce((s,c)=>s+getInoutSec(c.id),0);
   const coursesSum=obstacleTotalSec+inoutSum;
-  const finalTime=hasTotalTime?totalTimeSec:coursesSum;
-  const moveTime=hasTotalTime?totalTimeSec-coursesSum:null;
+
+  // 구간별 이동시간 계산
+  const getMoveTimes=()=>{
+    const moves:number[]=[];
+    // 장애물 OUT → 장대허들 IN
+    const obsOut=obstacleTotalSec;
+    const hurdleIn=toSec(inout["hurdle"].inM,inout["hurdle"].inS);
+    if(obsOut>0&&hurdleIn>0) moves.push(Math.max(0,hurdleIn-obsOut));
+    // 장대허들 OUT → 밀고당기기 IN
+    const hurdleOut=toSec(inout["hurdle"].outM,inout["hurdle"].outS);
+    const resistIn=toSec(inout["resistance"].inM,inout["resistance"].inS);
+    if(hurdleOut>0&&resistIn>0) moves.push(Math.max(0,resistIn-hurdleOut));
+    // 밀고당기기 OUT → 구조하기 IN
+    const resistOut=toSec(inout["resistance"].outM,inout["resistance"].outS);
+    const rescueIn=toSec(inout["rescue"].inM,inout["rescue"].inS);
+    if(resistOut>0&&rescueIn>0) moves.push(Math.max(0,rescueIn-resistOut));
+    // 구조하기 OUT → 방아쇠 IN
+    const rescueOut=toSec(inout["rescue"].outM,inout["rescue"].outS);
+    const triggerIn=toSec(inout["trigger"].inM,inout["trigger"].inS);
+    if(rescueOut>0&&triggerIn>0) moves.push(Math.max(0,triggerIn-rescueOut));
+    return moves;
+  };
+  const moveTimes=getMoveTimes();
+  const totalMoveTime=moveTimes.reduce((s,v)=>s+v,0);
+
+  // 총시간 = 마지막 코스 OUT 시간
+  const triggerOut=toSec(inout["trigger"].outM,inout["trigger"].outS);
+  const finalTime=triggerOut>0?triggerOut:coursesSum+totalMoveTime;
+  const moveTime=totalMoveTime>0?totalMoveTime:null;
 
   const allFilled=lapSecs[5]>0&&INOUT_COURSES.every(c=>getInoutSec(c.id)>0);
 
@@ -475,26 +496,34 @@ export default function App(){
               );
             })}
 
-            {/* 종목 합산 */}
-            <div style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center",background:PC.primaryLight,border:`1px solid ${PC.primary}30`}}>
-              <span style={{fontWeight:700,fontSize:14,color:PC.primaryDark}}>종목 합산</span>
-              <span style={{fontSize:20,fontWeight:800,color:PC.primaryDark}}>{coursesSum>0?secToMMSS(coursesSum):"--:--"}</span>
-            </div>
-
-            {/* 실제 총시간 */}
+            {/* 종목 합산 + 이동시간 + 총시간 */}
             <div style={card}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span style={{fontWeight:700,fontSize:14,color:PC.text}}>실제 측정 총시간</span>
-                <MSInput mVal={totalM} sVal={totalS} onM={(e:any)=>setTotalM(e.target.value)} onS={(e:any)=>setTotalS(e.target.value)}/>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <span style={{fontWeight:700,fontSize:14,color:PC.text}}>종목 합산</span>
+                <span style={{fontSize:18,fontWeight:800,color:PC.primaryDark}}>{coursesSum>0?secToDisplay(coursesSum):"--"}</span>
               </div>
-              {hasTotalTime&&coursesSum>0&&(
-                <div style={{marginTop:12,background:PC.borderLight,borderRadius:8,padding:"10px 14px",display:"flex",justifyContent:"space-between"}}>
-                  <span style={{fontSize:13,color:PC.textSub}}>이동시간</span>
-                  <span style={{fontWeight:700,fontSize:14,color:moveTime!==null&&moveTime>=0?PC.text:PC.danger}}>
-                    {moveTime!==null&&moveTime>=0?secToDisplay(moveTime):"⚠ 종목합보다 짧음"}
-                  </span>
+              {moveTimes.length>0&&(
+                <div style={{marginBottom:10}}>
+                  <div style={{fontSize:12,color:PC.textSub,marginBottom:6}}>구간별 이동시간</div>
+                  {moveTimes.map((t,i)=>{
+                    const labels=["장애물→장대허들","장대허들→밀고당기기","밀고당기기→구조하기","구조하기→방아쇠"];
+                    return(
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:PC.textSub,marginBottom:4}}>
+                        <span>{labels[i]}</span>
+                        <span style={{fontWeight:500,color:PC.text}}>{secToDisplay(t)}</span>
+                      </div>
+                    );
+                  })}
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:600,marginTop:6,paddingTop:6,borderTop:`1px solid ${PC.borderLight}`}}>
+                    <span style={{color:PC.textSub}}>이동시간 합계</span>
+                    <span>{secToDisplay(totalMoveTime)}</span>
+                  </div>
                 </div>
               )}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingTop:10,borderTop:`1px solid ${PC.borderLight}`,background:PC.primaryLight,margin:"0 -1.25rem -1rem",padding:"10px 1.25rem 1rem",borderRadius:"0 0 12px 12px"}}>
+                <span style={{fontWeight:700,fontSize:14,color:PC.primaryDark}}>총시간 (방아쇠 OUT)</span>
+                <span style={{fontSize:20,fontWeight:800,color:PC.primaryDark}}>{finalTime>0?secToMMSS(finalTime):"--:--"}</span>
+              </div>
             </div>
 
             {/* 특이사항 */}
