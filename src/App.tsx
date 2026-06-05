@@ -116,23 +116,28 @@ function RecordCard({h,prev}:{h:any,prev:any}){
         </div>
       )}
 
-      {/* IN/OUT 코스별 소요시간 */}
-      {h.inout_times&&(
-        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
-          {INOUT_COURSES.map(c=>{
-            const t=h.inout_times[c.id];
-            if(!t)return null;
-            const diff=t-c.defaultTime;
-            const db=dBdg(diff);
-            return(
-              <span key={c.id} style={{fontSize:12,display:"flex",alignItems:"center",gap:4}}>
-                {c.icon} <span style={{color:PC.textSub}}>{secToDisplay(t)}</span>
-                {db&&diff!==0&&<span style={{color:db.fg}}>({diff>0?`+${diff}`:diff}초)</span>}
-              </span>
-            );
-          })}
-        </div>
-      )}
+      {/* IN/OUT 코스별 소요시간 — 신규/구형 데이터 모두 지원 */}
+      {(() => {
+        const timeData = h.inout_times || h.times || {};
+        const hasData = INOUT_COURSES.some(c => timeData[c.id]);
+        if (!hasData) return null;
+        return (
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
+            {INOUT_COURSES.map(c=>{
+              const t=timeData[c.id];
+              if(!t)return null;
+              const diff=t-c.defaultTime;
+              const db=dBdg(diff);
+              return(
+                <span key={c.id} style={{fontSize:12,display:"flex",alignItems:"center",gap:4}}>
+                  {c.icon} <span style={{color:PC.textSub}}>{secToDisplay(t)}</span>
+                  {db&&diff!==0&&<span style={{color:db.fg}}>({diff>0?`+${diff}`:diff}초)</span>}
+                </span>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {h.move_time>0&&<div style={{fontSize:12,color:PC.textSub,marginTop:4}}>이동시간 {secToDisplay(h.move_time)}</div>}
       {hasR&&(
@@ -315,17 +320,17 @@ export default function App(){
   async function handleSubmit(){
     if(!allFilled||!user)return;
     setLoading(true);
-    const inout_times:Record<string,number>={};
-    INOUT_COURSES.forEach(c=>{inout_times[c.id]=getInoutSec(c.id);});
+    const times:Record<string,number>={obstacle:obstacleTotalSec};
+    INOUT_COURSES.forEach(c=>{times[c.id]=getInoutSec(c.id);});
     const body={
       student_name:user.name, password:user.password,
       date:isoToKR(recDate),
       obstacle_laps:lapSecs,
-      inout_times,
+      inout_times:times,
+      times,
       total:coursesSum, total_time:finalTime,
       move_time:moveTime||0,
       ratings, memo,
-      times:{obstacle:obstacleTotalSec,...inout_times},
     };
     await dbPost("records",body);
     setMyHist(h=>[{...body,id:Date.now()},...h]);
