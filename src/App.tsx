@@ -184,9 +184,10 @@ function HistoryList({records}:{records:any[]}){
                 <tr key={c.id}>
                   <td style={{padding:"6px 8px",color:PC.textSub,whiteSpace:"nowrap"}}>{c.icon} {c.name}</td>
                   {sorted.map((h,i)=>{
-                    const val=h.inout_times?.[c.id]||0;
-                    const prev=sorted[i+1]?.inout_times?.[c.id]||null;
-                    const cb=cBdg(prev!==null?val-prev:null);
+                    const val=(h.inout_times?.[c.id]||h.times?.[c.id])||0;
+                    const prev=sorted[i+1];
+                    const prevVal=prev?(prev.inout_times?.[c.id]||prev.times?.[c.id])||0:null;
+                    const cb=cBdg(prevVal!==null?val-prevVal:null);
                     return <td key={h.id} style={{textAlign:"right",padding:"6px 8px",whiteSpace:"nowrap"}}>{val?secToDisplay(val):"-"}{cb&&val?<span style={{marginLeft:3,fontSize:11,color:cb.fg}}>{cb.txt}</span>:null}</td>;
                   })}
                 </tr>
