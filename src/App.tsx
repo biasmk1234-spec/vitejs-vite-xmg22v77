@@ -116,15 +116,18 @@ function RecordCard({h,prev}:{h:any,prev:any}){
         </div>
       )}
 
-      {/* IN/OUT 코스 */}
+      {/* IN/OUT 코스별 소요시간 */}
       {h.inout_times&&(
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
           {INOUT_COURSES.map(c=>{
             const t=h.inout_times[c.id];
             if(!t)return null;
+            const diff=t-c.defaultTime;
+            const db=dBdg(diff);
             return(
-              <span key={c.id} style={{fontSize:12}}>
+              <span key={c.id} style={{fontSize:12,display:"flex",alignItems:"center",gap:4}}>
                 {c.icon} <span style={{color:PC.textSub}}>{secToDisplay(t)}</span>
+                {db&&diff!==0&&<span style={{color:db.fg}}>({diff>0?`+${diff}`:diff}초)</span>}
               </span>
             );
           })}
