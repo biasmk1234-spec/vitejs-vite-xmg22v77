@@ -168,7 +168,13 @@ function RecordCard({h,prev}:{h:any,prev:any}){
 }
 
 function HistoryList({records}:{records:any[]}){
-  const sorted=[...records].sort((a,b)=>b.id-a.id);
+  const sorted=[...records].sort((a,b)=>{
+    const da=a.date?a.date.replace(/\./g,"-"):"";
+    const db2=b.date?b.date.replace(/\./g,"-"):"";
+    if(db2>da)return 1;
+    if(db2<da)return -1;
+    return b.id-a.id;
+  });
   const [cmp,setCmp]=useState(false);
   return(
     <div>
