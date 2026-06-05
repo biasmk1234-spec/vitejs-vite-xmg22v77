@@ -299,7 +299,7 @@ export default function App(){
   const finalTime=triggerOut>0?triggerOut:coursesSum+totalMoveTime;
   const moveTime=totalMoveTime>0?totalMoveTime:null;
 
-  const allFilled=lapSecs[5]>0&&INOUT_COURSES.every(c=>getInoutSec(c.id)>0);
+  const allFilled=lapSecs[5]>0;
 
   // 특이사항
   const [ratings,setRatings]=useState<Record<string,number|null>>({});
