@@ -330,12 +330,15 @@ export default function App(){
       if(loginPw!==loginPwC){setLoginErr("비밀번호가 일치하지 않아요.");setLoading(false);return;}
       if(rows.length>0){setLoginErr("이미 존재하는 이름이에요.");setLoading(false);return;}
       setUser({name:loginName.trim(),password:loginPw});
-      setMyHist([]);setScreen("record");setTab("record");
+      const all=await dbGet("records",`student_name=eq.${encodeURIComponent(loginName.trim())}&order=id.desc`);
+      setMyHist(Array.isArray(all)?all:[]);
+      setScreen("record");setTab("record");
     }else{
       if(rows.length===0){setLoginErr("등록된 기록이 없어요. 신규 등록을 선택하세요.");setLoading(false);return;}
       if(rows[0].password!==loginPw){setLoginErr("비밀번호가 틀렸어요.");setLoading(false);return;}
       setUser({name:loginName.trim(),password:loginPw});
-      const all=await dbGet("records",`student_name=eq.${encodeURIComponent(loginName.trim())}&order=created_at.desc`);
+      const all=await dbGet("records",`student_name=eq.${encodeURIComponent(loginName.trim())}&order=id.desc`);
+      console.log("loaded records:", all);
       setMyHist(all);setScreen("record");setTab("record");
     }
     setLoading(false);
@@ -356,8 +359,8 @@ export default function App(){
       move_time:moveTime||0,
       ratings, memo,
     };
-    await dbPost("records",body);
-    const newEntry={...body,id:Date.now()};
+    const result = await dbPost("records",body);
+    const newEntry={...body, id: result?.[0]?.id || Date.now()};
     setMyHist(h=>[newEntry,...h]);
     setSubmitted(newEntry);
     setLoading(false);
