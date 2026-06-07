@@ -102,6 +102,8 @@ function EditModal({h, onClose, onSave}:{h:any, onClose:()=>void, onSave:(update
   const [memo,setMemo]=useState(h.memo||"");
   const [ratings,setRatings]=useState<Record<string,number|null>>(h.ratings||{});
   const [saving,setSaving]=useState(false);
+  const initDateISO=(d:string)=>{ if(!d)return todayISO(); if(d.includes("."))return d.replace(/\./g,"-"); return d; };
+  const [recDateEdit,setRecDateEdit]=useState(initDateISO(h.record_date||h.date||""));
 
   const updateLap=(i:number,field:"m"|"s",v:string)=>setLaps(prev=>prev.map((l,idx)=>idx===i?{...l,[field]:v}:l));
   const updateInout=(id:string,field:string,v:string)=>setInout(p=>({...p,[id]:{...p[id],[field]:v}}));
@@ -152,6 +154,8 @@ function EditModal({h, onClose, onSave}:{h:any, onClose:()=>void, onSave:(update
       passed:finalTime<=PASS_TIME_SEC,
       ratings,
       memo,
+      record_date:recDateEdit,
+      date:isoToKR(recDateEdit),
     };
     try{
       await dbPatch("records",h.id,body);
@@ -169,8 +173,9 @@ function EditModal({h, onClose, onSave}:{h:any, onClose:()=>void, onSave:(update
           <span style={{fontSize:16,fontWeight:800,color:PC.text}}>✏️ 기록 수정</span>
           <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:PC.textSub}}>✕</button>
         </div>
-        <div style={{fontSize:13,color:PC.textSub,marginBottom:16,background:PC.borderLight,borderRadius:8,padding:"8px 12px"}}>
-          📅 {h.date||h.record_date} 기록을 수정합니다
+        <div style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <span style={{fontSize:14,fontWeight:600,color:PC.text}}>📅 측정 날짜</span>
+          <input type="date" value={recDateEdit} onChange={e=>setRecDateEdit(e.target.value)} style={{border:`1px solid ${PC.border}`,borderRadius:8,padding:"7px 10px",fontSize:14,color:PC.text,background:PC.white,cursor:"pointer"}}/>
         </div>
 
         {/* 장애물 6랩 */}
