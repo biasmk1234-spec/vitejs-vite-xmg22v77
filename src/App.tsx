@@ -29,11 +29,18 @@ function secToDisplay(s:number){ const n=Math.round(s); if(n<=0)return"0초"; re
 function todayISO(){ return new Date().toISOString().split("T")[0]; }
 function isoToKR(iso:string){ if(!iso)return""; const[y,m,d]=iso.split("-"); return `${y}.${m}.${d}`; }
 function toSec(m:string,s:string){ return (Number(m)||0)*60+(Number(s)||0); }
+function secToMS(s:number){ return { m:String(Math.floor(s/60)), s:String(s%60) }; }
 
 const H:Record<string,string> = { "Content-Type":"application/json", apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}` };
 async function dbGet(t:string,q=""){ const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}?select=*&${q}`,{headers:{...H,Accept:"application/json"}}); return r.json(); }
 async function dbPost(t:string,b:any){
   const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}`,{method:"POST",headers:{...H,Prefer:"return=representation"},body:JSON.stringify(b)});
+  const data=await r.json();
+  if(!r.ok) throw new Error(JSON.stringify(data));
+  return data;
+}
+async function dbPatch(t:string,id:number,b:any){
+  const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}?id=eq.${id}`,{method:"PATCH",headers:{...H,Prefer:"return=representation"},body:JSON.stringify(b)});
   const data=await r.json();
   if(!r.ok) throw new Error(JSON.stringify(data));
   return data;
@@ -69,63 +76,265 @@ function MSInput({mVal,sVal,onM,onS}:{mVal:string,sVal:string,onM:any,onS:any}){
   );
 }
 
-function RecordCard({h,prev}:{h:any,prev:any}){
-  const chg=prev?h.total_time-prev.total_time:null;
-  const cb=cBdg(chg);
-  const r=h.ratings||{};
-  const hasR=r.condition||r.i_obstacle||r.i_hurdle||r.i_resistance||r.i_rescue||r.i_trigger;
-  const obs:number[]=h.obstacle_laps||[];
-  // inout_times 지원: 신규(객체) 또는 구형(숫자)
-  const getElapsed=(id:string)=>{
-    const d=h.inout_times?.[id];
-    if(!d)return h.times?.[id]||0;
-    if(typeof d==="object")return d.elapsed||0;
-    return d;
+// ── 수정 모달 ──
+function EditModal({h, onClose, onSave}:{h:any, onClose:()=>void, onSave:(updated:any)=>void}){
+  const initLaps=(obs:number[])=>{
+    const arr=Array(6).fill(null).map(()=>({m:"",s:""}));
+    (obs||[]).forEach((cum,i)=>{ const ms=secToMS(cum); arr[i]={m:ms.m,s:ms.s}; });
+    return arr;
   };
+  const initInout=(it:any)=>{
+    const base=Object.fromEntries(INOUT_COURSES.map(c=>[c.id,{inM:"",inS:"",outM:"",outS:""}]));
+    if(!it) return base;
+    INOUT_COURSES.forEach(c=>{
+      const d=it[c.id];
+      if(!d) return;
+      if(typeof d==="object"){
+        const inMs=secToMS(d.in||0); const outMs=secToMS(d.out||0);
+        base[c.id]={inM:inMs.m,inS:inMs.s,outM:outMs.m,outS:outMs.s};
+      }
+    });
+    return base;
+  };
+
+  const [laps,setLaps]=useState<{m:string,s:string}[]>(initLaps(h.obstacle_laps||[]));
+  const [inout,setInout]=useState<Record<string,{inM:string,inS:string,outM:string,outS:string}>>(initInout(h.inout_times));
+  const [memo,setMemo]=useState(h.memo||"");
+  const [ratings,setRatings]=useState<Record<string,number|null>>(h.ratings||{});
+  const [saving,setSaving]=useState(false);
+
+  const updateLap=(i:number,field:"m"|"s",v:string)=>setLaps(prev=>prev.map((l,idx)=>idx===i?{...l,[field]:v}:l));
+  const updateInout=(id:string,field:string,v:string)=>setInout(p=>({...p,[id]:{...p[id],[field]:v}}));
+  const lapSecs=laps.map(l=>toSec(l.m,l.s));
+  const getInoutSec=(id:string)=>{ const {inM,inS,outM,outS}=inout[id]; const i=toSec(inM,inS),o=toSec(outM,outS); return o>i?o-i:0; };
+
+  const getMoveTimes=()=>{
+    const moves:number[]=[];
+    const obsOut=lapSecs[5];
+    const hIn=toSec(inout.hurdle.inM,inout.hurdle.inS); if(obsOut>0&&hIn>0)moves.push(Math.max(0,hIn-obsOut));
+    const hOut=toSec(inout.hurdle.outM,inout.hurdle.outS); const rIn=toSec(inout.resistance.inM,inout.resistance.inS); if(hOut>0&&rIn>0)moves.push(Math.max(0,rIn-hOut));
+    const rOut=toSec(inout.resistance.outM,inout.resistance.outS); const scIn=toSec(inout.rescue.inM,inout.rescue.inS); if(rOut>0&&scIn>0)moves.push(Math.max(0,scIn-rOut));
+    const scOut=toSec(inout.rescue.outM,inout.rescue.outS); const tIn=toSec(inout.trigger.inM,inout.trigger.inS); if(scOut>0&&tIn>0)moves.push(Math.max(0,tIn-scOut));
+    return moves;
+  };
+  const moveTimes=getMoveTimes();
+  const totalMoveTime=moveTimes.reduce((s,v)=>s+v,0);
+  const triggerOut=toSec(inout.trigger.outM,inout.trigger.outS);
+  const obstacleTotalSec=lapSecs[5]||0;
+  const inoutSum=INOUT_COURSES.reduce((s,c)=>s+getInoutSec(c.id),0);
+  const finalTime=triggerOut>0?triggerOut:obstacleTotalSec+inoutSum+totalMoveTime;
+
+  const ratingItems=[
+    {key:"condition",label:"오늘 나의 컨디션은?"},
+    {key:"i_obstacle",label:"장애물달리기 체감 강도는?"},
+    {key:"i_hurdle",label:"장대허들 체감 강도는?"},
+    {key:"i_resistance",label:"밀고당기기 체감 강도는?"},
+    {key:"i_rescue",label:"구조하기 체감 강도는?"},
+    {key:"i_trigger",label:"방아쇠당기기 체감 강도는?"},
+  ];
+  const rBgs=["#e6f4ea","#e6f4ea","#fef7e0","#fce8e6","#fce8e6"];
+  const rFgs=["#34a853","#34a853","#f29900","#ea4335","#c5221f"];
+  const rLbls=["매우 힘듦","힘듦","보통","좋음","매우 좋음"];
+
+  async function handleSave(){
+    setSaving(true);
+    const inout_times=Object.fromEntries(INOUT_COURSES.map(c=>[c.id,{
+      in:toSec(inout[c.id].inM,inout[c.id].inS),
+      out:toSec(inout[c.id].outM,inout[c.id].outS),
+      elapsed:getInoutSec(c.id),
+    }]));
+    const body={
+      obstacle_laps:lapSecs,
+      inout_times,
+      total_time:finalTime,
+      total_sec:finalTime,
+      move_time:totalMoveTime||0,
+      passed:finalTime<=PASS_TIME_SEC,
+      ratings,
+      memo,
+    };
+    try{
+      await dbPatch("records",h.id,body);
+      onSave({...h,...body});
+    } catch(e:any){
+      alert("수정 실패: "+e.message);
+    }
+    setSaving(false);
+  }
+
   return(
-    <div style={card}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-        <span style={{fontSize:13,color:PC.textSub,fontWeight:500}}>📅 {h.date||h.record_date}</span>
-        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>
-          <span style={{fontWeight:700,color:PC.text}}>{secToMMSS(h.total_time||h.total_sec||0)}</span>
-          <span style={passTag((h.total_time||h.total_sec||0)<=PASS_TIME_SEC)}>{(h.total_time||h.total_sec||0)<=PASS_TIME_SEC?"PASS":"FAIL"}</span>
-          {cb&&<Bdg {...cb}/>}
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",overflowY:"auto",padding:"1rem"}}>
+      <div style={{background:PC.white,borderRadius:16,width:"100%",maxWidth:480,padding:"1.5rem",marginTop:"1rem",marginBottom:"1rem"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <span style={{fontSize:16,fontWeight:800,color:PC.text}}>✏️ 기록 수정</span>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:PC.textSub}}>✕</button>
         </div>
-      </div>
-      {obs.length>0&&obs[obs.length-1]>0&&(
-        <div style={{marginBottom:8}}>
-          <div style={{fontSize:12,fontWeight:600,color:PC.textSub,marginBottom:4}}>🏃 장애물달리기</div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {obs.map((lap:number,i:number)=>{
-              const prev_lap=i>0?obs[i-1]:0;
-              const interval=lap-prev_lap;
-              return(<span key={i} style={{fontSize:11,background:PC.borderLight,borderRadius:6,padding:"2px 7px",color:PC.textSub}}>{i+1}R {secToDisplay(interval)} <span style={{color:PC.textLight}}>({secToDisplay(lap)})</span></span>);
-            })}
-          </div>
+        <div style={{fontSize:13,color:PC.textSub,marginBottom:16,background:PC.borderLight,borderRadius:8,padding:"8px 12px"}}>
+          📅 {h.date||h.record_date} 기록을 수정합니다
         </div>
-      )}
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
+
+        {/* 장애물 6랩 */}
+        <div style={{...card,marginBottom:10}}>
+          <div style={{fontWeight:700,fontSize:14,color:PC.text,marginBottom:10}}>🏃 장애물달리기 (누적시간)</div>
+          {laps.map((l,i)=>{
+            const cumSec=lapSecs[i];
+            const prevSec=i>0?lapSecs[i-1]:0;
+            const interval=cumSec>0&&(i===0||prevSec>0)?cumSec-prevSec:null;
+            return(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                <span style={{fontSize:13,fontWeight:600,color:PC.primary,width:28,flexShrink:0}}>{i+1}R</span>
+                <MSInput mVal={l.m} sVal={l.s} onM={(e:any)=>updateLap(i,"m",e.target.value)} onS={(e:any)=>updateLap(i,"s",e.target.value)}/>
+                {cumSec>0&&<span style={{fontSize:12,color:PC.textSub}}>{secToDisplay(cumSec)}</span>}
+                {interval!==null&&<span style={{fontSize:12,background:PC.primaryLight,color:PC.primaryDark,borderRadius:20,padding:"2px 8px"}}>구간 {secToDisplay(interval)}</span>}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* IN/OUT */}
         {INOUT_COURSES.map(c=>{
-          const t=getElapsed(c.id);
-          if(!t)return null;
-          const diff=t-c.defaultTime;
+          const sec=getInoutSec(c.id);
+          const diff=sec>0?sec-c.defaultTime:null;
           const db=dBdg(diff);
-          return(<span key={c.id} style={{fontSize:12,display:"flex",alignItems:"center",gap:4}}>{c.icon} <span style={{color:PC.textSub}}>{secToDisplay(t)}</span>{db&&diff!==0&&<span style={{color:db.fg}}>({diff>0?`+${diff}`:diff}초)</span>}</span>);
+          const io=inout[c.id];
+          const inSec=toSec(io.inM,io.inS);
+          const outSec=toSec(io.outM,io.outS);
+          return(
+            <div key={c.id} style={{...card,marginBottom:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+                <span style={{fontWeight:700,fontSize:14}}>{c.icon} {c.name}</span>
+                <span style={{fontSize:12,color:PC.textSub,background:PC.borderLight,borderRadius:20,padding:"3px 10px"}}>기준 {secToDisplay(c.defaultTime)}</span>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontSize:13,color:PC.textSub,width:32,flexShrink:0}}>IN</span>
+                  <MSInput mVal={io.inM} sVal={io.inS} onM={(e:any)=>updateInout(c.id,"inM",e.target.value)} onS={(e:any)=>updateInout(c.id,"inS",e.target.value)}/>
+                  {inSec>0&&<span style={{fontSize:12,color:PC.textSub}}>{secToDisplay(inSec)}</span>}
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontSize:13,color:PC.textSub,width:32,flexShrink:0}}>OUT</span>
+                  <MSInput mVal={io.outM} sVal={io.outS} onM={(e:any)=>updateInout(c.id,"outM",e.target.value)} onS={(e:any)=>updateInout(c.id,"outS",e.target.value)}/>
+                  {outSec>0&&<span style={{fontSize:12,color:PC.textSub}}>{secToDisplay(outSec)}</span>}
+                </div>
+              </div>
+              {sec>0&&(
+                <div style={{marginTop:8,background:PC.borderLight,borderRadius:8,padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontSize:13,color:PC.textSub}}>소요시간</span>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <span style={{fontWeight:700,fontSize:14}}>{secToDisplay(sec)}</span>
+                    {db&&<Bdg {...db}/>}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
         })}
-      </div>
-      {(h.move_time||0)>0&&<div style={{fontSize:12,color:PC.textSub,marginTop:4}}>이동시간 {secToDisplay(h.move_time)}</div>}
-      {hasR&&(
-        <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${PC.borderLight}`,display:"flex",gap:6,flexWrap:"wrap"}}>
-          {r.condition&&<span style={{fontSize:12,background:PC.primaryLight,color:PC.primaryDark,borderRadius:20,padding:"3px 10px"}}>컨디션 {r.condition}/5</span>}
-          {RATING_KEYS.map(({key,label})=>r[key]?<span key={key} style={{fontSize:12,background:PC.borderLight,color:PC.textSub,borderRadius:20,padding:"3px 10px"}}>{label} {r[key]}/5</span>:null)}
+
+        {/* 총시간 미리보기 */}
+        {finalTime>0&&(
+          <div style={{background:PC.primaryLight,borderRadius:10,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <span style={{fontWeight:700,color:PC.primaryDark}}>수정 후 총시간</span>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <span style={{fontSize:20,fontWeight:800,color:PC.primaryDark}}>{secToMMSS(finalTime)}</span>
+              <span style={passTag(finalTime<=PASS_TIME_SEC)}>{finalTime<=PASS_TIME_SEC?"PASS":"FAIL"}</span>
+            </div>
+          </div>
+        )}
+
+        {/* 특이사항 */}
+        <div style={{...card,marginBottom:12}}>
+          <div style={{fontSize:14,fontWeight:700,color:PC.text,marginBottom:12}}>측정 시 특이사항</div>
+          {ratingItems.map(item=>(
+            <div key={item.key} style={{marginBottom:12}}>
+              <div style={{fontSize:13,color:PC.textSub,marginBottom:6,fontWeight:500}}>{item.label}</div>
+              <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                {[1,2,3,4,5].map(n=>{const active=ratings[item.key]===n;return(
+                  <button key={n} onClick={()=>setRatings(p=>({...p,[item.key]:active?null:n}))} style={{width:40,height:40,borderRadius:10,border:active?"none":`1px solid ${PC.border}`,background:active?rBgs[n-1]:PC.white,color:active?rFgs[n-1]:PC.textSub,fontSize:13,fontWeight:active?700:400,cursor:"pointer"}}>{n}</button>
+                );})}
+                {ratings[item.key]&&<span style={{fontSize:12,color:PC.textSub,marginLeft:4}}>{rLbls[(ratings[item.key]||1)-1]}</span>}
+              </div>
+            </div>
+          ))}
+          <label style={{fontSize:13,color:PC.textSub,marginBottom:4,display:"block",fontWeight:500}}>기타 특이사항</label>
+          <textarea rows={3} placeholder="자유롭게 입력하세요" value={memo} onChange={e=>setMemo(e.target.value)} style={{...inSt,resize:"vertical" as const,fontSize:13}}/>
         </div>
-      )}
-      {h.memo&&<div style={{fontSize:12,color:PC.textSub,marginTop:6,paddingTop:6,borderTop:`1px solid ${PC.borderLight}`}}>📝 {h.memo}</div>}
+
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={onClose} style={{flex:1,padding:"12px",borderRadius:10,border:`1px solid ${PC.border}`,background:PC.white,color:PC.textSub,fontSize:15,fontWeight:700,cursor:"pointer"}}>취소</button>
+          <button onClick={handleSave} disabled={saving} style={{...btnPrimary,flex:2}}>{saving?"저장 중...":"수정 저장"}</button>
+        </div>
+      </div>
     </div>
   );
 }
 
-function HistoryList({records}:{records:any[]}){
+function RecordCard({h,prev,onUpdate}:{h:any,prev:any,onUpdate?:(updated:any)=>void}){
+  const [editing,setEditing]=useState(false);
+  const [data,setData]=useState(h);
+  const chg=prev?(data.total_time||data.total_sec||0)-(prev.total_time||prev.total_sec||0):null;
+  const cb=cBdg(chg);
+  const r=data.ratings||{};
+  const hasR=r.condition||r.i_obstacle||r.i_hurdle||r.i_resistance||r.i_rescue||r.i_trigger;
+  const obs:number[]=data.obstacle_laps||[];
+  const getElapsed=(id:string)=>{
+    const d=data.inout_times?.[id];
+    if(!d)return data.times?.[id]||0;
+    if(typeof d==="object")return d.elapsed||0;
+    return d;
+  };
+  const handleSaved=(updated:any)=>{
+    setData(updated);
+    setEditing(false);
+    onUpdate&&onUpdate(updated);
+  };
+  return(
+    <>
+      {editing&&<EditModal h={data} onClose={()=>setEditing(false)} onSave={handleSaved}/>}
+      <div style={card}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <span style={{fontSize:13,color:PC.textSub,fontWeight:500}}>📅 {data.date||data.record_date}</span>
+          <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>
+            <span style={{fontWeight:700,color:PC.text}}>{secToMMSS(data.total_time||data.total_sec||0)}</span>
+            <span style={passTag((data.total_time||data.total_sec||0)<=PASS_TIME_SEC)}>{(data.total_time||data.total_sec||0)<=PASS_TIME_SEC?"PASS":"FAIL"}</span>
+            {cb&&<Bdg {...cb}/>}
+            <button onClick={()=>setEditing(true)} style={{background:PC.borderLight,border:"none",borderRadius:8,padding:"4px 10px",fontSize:12,color:PC.textSub,cursor:"pointer",fontWeight:600}}>✏️ 수정</button>
+          </div>
+        </div>
+        {obs.length>0&&obs[obs.length-1]>0&&(
+          <div style={{marginBottom:8}}>
+            <div style={{fontSize:12,fontWeight:600,color:PC.textSub,marginBottom:4}}>🏃 장애물달리기</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {obs.map((lap:number,i:number)=>{
+                const prev_lap=i>0?obs[i-1]:0;
+                const interval=lap-prev_lap;
+                return(<span key={i} style={{fontSize:11,background:PC.borderLight,borderRadius:6,padding:"2px 7px",color:PC.textSub}}>{i+1}R {secToDisplay(interval)} <span style={{color:PC.textLight}}>({secToDisplay(lap)})</span></span>);
+              })}
+            </div>
+          </div>
+        )}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
+          {INOUT_COURSES.map(c=>{
+            const t=getElapsed(c.id);
+            if(!t)return null;
+            const diff=t-c.defaultTime;
+            const db=dBdg(diff);
+            return(<span key={c.id} style={{fontSize:12,display:"flex",alignItems:"center",gap:4}}>{c.icon} <span style={{color:PC.textSub}}>{secToDisplay(t)}</span>{db&&diff!==0&&<span style={{color:db.fg}}>({diff>0?`+${diff}`:diff}초)</span>}</span>);
+          })}
+        </div>
+        {(data.move_time||0)>0&&<div style={{fontSize:12,color:PC.textSub,marginTop:4}}>이동시간 {secToDisplay(data.move_time)}</div>}
+        {hasR&&(
+          <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${PC.borderLight}`,display:"flex",gap:6,flexWrap:"wrap"}}>
+            {r.condition&&<span style={{fontSize:12,background:PC.primaryLight,color:PC.primaryDark,borderRadius:20,padding:"3px 10px"}}>컨디션 {r.condition}/5</span>}
+            {RATING_KEYS.map(({key,label})=>r[key]?<span key={key} style={{fontSize:12,background:PC.borderLight,color:PC.textSub,borderRadius:20,padding:"3px 10px"}}>{label} {r[key]}/5</span>:null)}
+          </div>
+        )}
+        {data.memo&&<div style={{fontSize:12,color:PC.textSub,marginTop:6,paddingTop:6,borderTop:`1px solid ${PC.borderLight}`}}>📝 {data.memo}</div>}
+      </div>
+    </>
+  );
+}
+
+function HistoryList({records,onUpdate}:{records:any[],onUpdate?:(updated:any)=>void}){
   const sorted=[...records].sort((a,b)=>{
     const da=(a.date||a.record_date||"").replace(/\./g,"-");
     const db2=(b.date||b.record_date||"").replace(/\./g,"-");
@@ -173,7 +382,7 @@ function HistoryList({records}:{records:any[]}){
           </table>
         </div>
       )}
-      {sorted.map((h,i)=><RecordCard key={i} h={h} prev={sorted[i+1]||null}/>)}
+      {sorted.map((h,i)=><RecordCard key={h.id||i} h={h} prev={sorted[i+1]||null} onUpdate={onUpdate}/>)}
     </div>
   );
 }
@@ -196,13 +405,11 @@ export default function App(){
   const [allHist,setAllHist]=useState<any[]>([]);
   const [adminStu,setAdminStu]=useState("");
 
-  // 장애물 6랩
   const [laps,setLaps]=useState<{m:string,s:string}[]>(Array(6).fill(null).map(()=>({m:"",s:""})));
   const updateLap=(i:number,field:"m"|"s",v:string)=>setLaps(prev=>prev.map((l,idx)=>idx===i?{...l,[field]:v}:l));
   const lapSecs=laps.map(l=>toSec(l.m,l.s));
   const obstacleTotalSec=lapSecs[5]||0;
 
-  // IN/OUT
   const [inout,setInout]=useState<Record<string,{inM:string,inS:string,outM:string,outS:string}>>(
     Object.fromEntries(INOUT_COURSES.map(c=>[c.id,{inM:"",inS:"",outM:"",outS:""}]))
   );
@@ -228,7 +435,6 @@ export default function App(){
   const moveTime=totalMoveTime>0?totalMoveTime:null;
   const allFilled=lapSecs[5]>0;
 
-  // 특이사항
   const [ratings,setRatings]=useState<Record<string,number|null>>({});
   const [memo,setMemo]=useState("");
   const ratingItems=[
@@ -243,11 +449,9 @@ export default function App(){
   const rFgs=["#34a853","#34a853","#f29900","#ea4335","#c5221f"];
   const rLbls=["매우 힘듦","힘듦","보통","좋음","매우 좋음"];
 
-  // ── 로그인: students 테이블로 계정 관리 ──
   async function handleLogin(){
     if(!loginName.trim()||!loginPw.trim()){setLoginErr("이름과 비밀번호를 입력하세요");return;}
     setLoading(true);setLoginErr("");
-    // 원장님
     if(loginPw===MASTER_PW){
       setUser({name:"원장님",isAdmin:true});
       const rows=await dbGet("records","order=created_at.desc");
@@ -255,13 +459,10 @@ export default function App(){
       setScreen("admin");setLoading(false);return;
     }
     try{
-      // students 테이블에서 계정 조회
       const existing=await dbGet("students",`name=eq.${encodeURIComponent(loginName.trim())}`);
       if(existing.length>0){
-        // 기존 계정 → 비번 확인
         if(existing[0].password!==loginPw){setLoginErr("비밀번호가 틀렸어요");setLoading(false);return;}
       } else {
-        // 신규 → 자동 가입
         await dbPost("students",{name:loginName.trim(),password:loginPw});
       }
       setUser({name:loginName.trim(),password:loginPw});
@@ -312,10 +513,17 @@ export default function App(){
     setRatings({});setMemo("");setSubmitted(null);setRecDate(todayISO());
   }
 
+  // 기록 수정 후 상태 업데이트
+  const handleMyHistUpdate=(updated:any)=>{
+    setMyHist(prev=>prev.map(r=>r.id===updated.id?updated:r));
+  };
+  const handleAllHistUpdate=(updated:any)=>{
+    setAllHist(prev=>prev.map(r=>r.id===updated.id?updated:r));
+  };
+
   const stuNames=[...new Set(allHist.map((h:any)=>h.student_name))];
   const activeStu=adminStu||stuNames[0]||"";
 
-  // ── 로그인 화면 ──
   if(screen==="login") return(
     <div style={{fontFamily:"'Apple SD Gothic Neo',sans-serif",minHeight:"100vh",background:PC.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:"2rem 1rem"}}>
       <div style={{width:"100%",maxWidth:420}}>
@@ -340,7 +548,6 @@ export default function App(){
     </div>
   );
 
-  // ── 관리자 화면 ──
   if(screen==="admin") return(
     <div style={{fontFamily:"'Apple SD Gothic Neo',sans-serif",minHeight:"100vh",background:PC.bg,paddingBottom:"2rem"}}>
       <div style={hdrSt}>
@@ -361,14 +568,13 @@ export default function App(){
             <select value={activeStu} onChange={e=>setAdminStu(e.target.value)} style={{...inSt,marginBottom:14}}>
               {stuNames.map(n=><option key={n as string} value={n as string}>{n as string}</option>)}
             </select>
-            <HistoryList records={allHist.filter(h=>h.student_name===activeStu)}/>
+            <HistoryList records={allHist.filter(h=>h.student_name===activeStu)} onUpdate={handleAllHistUpdate}/>
           </>
         )}
       </div>
     </div>
   );
 
-  // ── 학생 화면 ──
   return(
     <div style={{fontFamily:"'Apple SD Gothic Neo',sans-serif",minHeight:"100vh",background:PC.bg,paddingBottom:"2rem"}}>
       <div style={hdrSt}>
@@ -396,8 +602,6 @@ export default function App(){
               <span style={{fontSize:14,fontWeight:600,color:PC.text}}>📅 측정 날짜</span>
               <input type="date" value={recDate} onChange={e=>setRecDate(e.target.value)} style={{border:`1px solid ${PC.border}`,borderRadius:8,padding:"7px 10px",fontSize:14,color:PC.text,background:PC.white,cursor:"pointer"}}/>
             </div>
-
-            {/* 장애물달리기 6랩 */}
             <div style={card}>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}>
                 <span style={{fontWeight:700,fontSize:14,color:PC.text}}>🏃 장애물달리기</span>
@@ -424,8 +628,6 @@ export default function App(){
                 </div>
               )}
             </div>
-
-            {/* IN/OUT 코스 */}
             {INOUT_COURSES.map((c,ci)=>{
               const sec=getInoutSec(c.id);
               const diff=sec>0?sec-c.defaultTime:null;
@@ -467,8 +669,6 @@ export default function App(){
                 </div>
               );
             })}
-
-            {/* 종합 */}
             <div style={card}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                 <span style={{fontWeight:700,fontSize:14,color:PC.text}}>종목 합산</span>
@@ -491,8 +691,6 @@ export default function App(){
                 <span style={{fontSize:20,fontWeight:800,color:PC.primaryDark}}>{finalTime>0?secToMMSS(finalTime):"--:--"}</span>
               </div>
             </div>
-
-            {/* 특이사항 */}
             <div style={card}>
               <div style={{fontSize:14,fontWeight:700,color:PC.text,marginBottom:16}}>측정 시 특이사항</div>
               {ratingItems.map(item=>(
@@ -509,7 +707,6 @@ export default function App(){
               <label style={{fontSize:13,color:PC.textSub,marginBottom:4,display:"block",fontWeight:500}}>기타 특이사항</label>
               <textarea rows={3} placeholder="자유롭게 입력하세요" value={memo} onChange={e=>setMemo(e.target.value)} style={{...inSt,resize:"vertical" as const,fontSize:13}}/>
             </div>
-
             <button onClick={handleSubmit} disabled={!allFilled||loading} style={btnPrimary}>{loading?"저장 중...":"기록 저장"}</button>
           </>
         ):(()=>{
@@ -564,11 +761,10 @@ export default function App(){
             </div>
           );
         })())}
-
         {tab==="history"&&(
           myHist.length===0
             ?<div style={{textAlign:"center",padding:"3rem 0",color:PC.textSub,fontSize:14}}>아직 저장된 기록이 없습니다.</div>
-            :<HistoryList records={myHist}/>
+            :<HistoryList records={myHist} onUpdate={handleMyHistUpdate}/>
         )}
       </div>
     </div>
