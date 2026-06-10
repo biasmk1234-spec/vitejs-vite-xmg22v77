@@ -273,7 +273,42 @@ function EditModal({h, onClose, onSave}:{h:any, onClose:()=>void, onSave:(update
   );
 }
 
-function RecordCard({h,prev,onUpdate}:{h:any,prev:any,onUpdate?:(updated:any)=>void}){
+function AdminCommentBox({data,onSave}:{data:any,onSave:(updated:any)=>void}){
+  const [open,setOpen]=useState(false);
+  const [text,setText]=useState(data.admin_comment||"");
+  const [saving,setSaving]=useState(false);
+  async function save(){
+    setSaving(true);
+    try{
+      await dbPatch("records",data.id,{admin_comment:text});
+      onSave({...data,admin_comment:text});
+      setOpen(false);
+    } catch(e:any){alert("저장 실패: "+e.message);}
+    setSaving(false);
+  }
+  return(
+    <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${PC.borderLight}`}}>
+      {!open?(
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          {data.admin_comment
+            ?<span style={{fontSize:12,color:PC.primaryDark,fontWeight:600,flex:1}}>💬 {data.admin_comment}</span>
+            :<span style={{fontSize:12,color:PC.textLight}}>코멘트 없음</span>}
+          <button onClick={()=>{setText(data.admin_comment||"");setOpen(true);}} style={{background:PC.primaryLight,border:"none",borderRadius:8,padding:"4px 10px",fontSize:12,color:PC.primaryDark,cursor:"pointer",fontWeight:600,marginLeft:8,whiteSpace:"nowrap"}}>{data.admin_comment?"✏️ 수정":"💬 코멘트"}</button>
+        </div>
+      ):(
+        <div>
+          <textarea rows={2} value={text} onChange={e=>setText(e.target.value)} placeholder="원장님 코멘트 입력..." style={{...inSt,fontSize:13,resize:"vertical" as const,marginBottom:6}}/>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={()=>setOpen(false)} style={{flex:1,padding:"7px",borderRadius:8,border:`1px solid ${PC.border}`,background:PC.white,color:PC.textSub,fontSize:13,cursor:"pointer"}}>취소</button>
+            <button onClick={save} disabled={saving} style={{flex:2,padding:"7px",borderRadius:8,border:"none",background:PC.primary,color:PC.white,fontSize:13,fontWeight:700,cursor:"pointer"}}>{saving?"저장 중...":"저장"}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated:any)=>void,isAdmin?:boolean}){
   const [editing,setEditing]=useState(false);
   const [data,setData]=useState(h);
   const chg=prev?(data.total_time||data.total_sec||0)-(prev.total_time||prev.total_sec||0):null;
@@ -334,12 +369,14 @@ function RecordCard({h,prev,onUpdate}:{h:any,prev:any,onUpdate?:(updated:any)=>v
           </div>
         )}
         {data.memo&&<div style={{fontSize:12,color:PC.textSub,marginTop:6,paddingTop:6,borderTop:`1px solid ${PC.borderLight}`}}>📝 {data.memo}</div>}
+        {isAdmin&&<AdminCommentBox data={data} onSave={d=>{setData(d);onUpdate&&onUpdate(d);}}/>}
+        {!isAdmin&&data.admin_comment&&<div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${PC.borderLight}`,fontSize:12,color:PC.primaryDark,fontWeight:600}}>💬 원장님: {data.admin_comment}</div>}
       </div>
     </>
   );
 }
 
-function HistoryList({records,onUpdate}:{records:any[],onUpdate?:(updated:any)=>void}){
+function HistoryList({records,onUpdate,isAdmin}:{records:any[],onUpdate?:(updated:any)=>void,isAdmin?:boolean}){
   const sorted=[...records].sort((a,b)=>{
     const da=(a.date||a.record_date||"").replace(/\./g,"-");
     const db2=(b.date||b.record_date||"").replace(/\./g,"-");
@@ -387,7 +424,7 @@ function HistoryList({records,onUpdate}:{records:any[],onUpdate?:(updated:any)=>
           </table>
         </div>
       )}
-      {sorted.map((h,i)=><RecordCard key={h.id||i} h={h} prev={sorted[i+1]||null} onUpdate={onUpdate}/>)}
+      {sorted.map((h,i)=><RecordCard key={h.id||i} h={h} prev={sorted[i+1]||null} onUpdate={onUpdate} isAdmin={isAdmin}/>)}
     </div>
   );
 }
@@ -573,7 +610,7 @@ export default function App(){
             <select value={activeStu} onChange={e=>setAdminStu(e.target.value)} style={{...inSt,marginBottom:14}}>
               {stuNames.map(n=><option key={n as string} value={n as string}>{n as string}</option>)}
             </select>
-            <HistoryList records={allHist.filter(h=>h.student_name===activeStu)} onUpdate={handleAllHistUpdate}/>
+            <HistoryList records={allHist.filter(h=>h.student_name===activeStu)} onUpdate={handleAllHistUpdate} isAdmin={true}/>
           </>
         )}
       </div>
