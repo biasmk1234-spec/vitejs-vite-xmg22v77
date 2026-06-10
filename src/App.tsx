@@ -46,6 +46,13 @@ async function dbPatch(t:string,id:number,b:any){
   return data;
 }
 
+function getSeenAt(name:string){ return localStorage.getItem(`seen_comment_${name}`)||""; }
+function setSeenAt(name:string){ localStorage.setItem(`seen_comment_${name}`,new Date().toISOString()); }
+function hasNewComment(records:any[], name:string){
+  const seen=getSeenAt(name);
+  return records.some(r=>r.admin_comment&&r.comment_updated_at&&(!seen||r.comment_updated_at>seen));
+}
+
 function dBdg(diff:number|null){ if(diff===null)return null; if(diff>0)return{bg:PC.dangerLight,fg:PC.danger,txt:`+${diff}초 초과`}; if(diff<0)return{bg:PC.successLight,fg:PC.success,txt:`${Math.abs(diff)}초 단축`}; return{bg:PC.borderLight,fg:PC.textSub,txt:"기준"}; }
 function cBdg(d:number|null){ if(d===null)return null; if(d<0)return{bg:PC.successLight,fg:PC.success,txt:`▼${Math.abs(d)}초`}; if(d>0)return{bg:PC.dangerLight,fg:PC.danger,txt:`▲${d}초`}; return{bg:PC.borderLight,fg:PC.textSub,txt:"→"}; }
 function Bdg({bg,fg,txt}:{bg:string,fg:string,txt:string}){ return <span style={{background:bg,color:fg,borderRadius:20,padding:"3px 9px",fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}>{txt}</span>; }
@@ -280,8 +287,9 @@ function AdminCommentBox({data,onSave}:{data:any,onSave:(updated:any)=>void}){
   async function save(){
     setSaving(true);
     try{
-      await dbPatch("records",data.id,{admin_comment:text});
-      onSave({...data,admin_comment:text});
+      const now=new Date().toISOString();
+      await dbPatch("records",data.id,{admin_comment:text,comment_updated_at:now});
+      onSave({...data,admin_comment:text,comment_updated_at:now});
       setOpen(false);
     } catch(e:any){alert("저장 실패: "+e.message);}
     setSaving(false);
@@ -629,9 +637,10 @@ export default function App(){
         </div>
         <div style={{display:"flex",gap:0,borderBottom:`1px solid ${PC.border}`}}>
           {[["record","기록입력"],["history","내 기록"]].map(([k,v])=>(
-            <button key={k} style={{padding:"10px 20px",fontSize:14,fontWeight:tab===k?700:400,border:"none",background:"none",cursor:"pointer",color:tab===k?PC.primary:PC.textSub,borderBottom:tab===k?`2px solid ${PC.primary}`:"2px solid transparent",marginBottom:-1}}
-              onClick={()=>{setTab(k);if(k==="history"){dbGet("records",`student_name=eq.${encodeURIComponent(user.name)}&order=created_at.desc`).then((r:any[])=>setMyHist(Array.isArray(r)?r:[]));}}}>
+            <button key={k} style={{padding:"10px 20px",fontSize:14,fontWeight:tab===k?700:400,border:"none",background:"none",cursor:"pointer",color:tab===k?PC.primary:PC.textSub,borderBottom:tab===k?`2px solid ${PC.primary}`:"2px solid transparent",marginBottom:-1,position:"relative"}}
+              onClick={()=>{setTab(k);if(k==="history"){dbGet("records",`student_name=eq.${encodeURIComponent(user.name)}&order=created_at.desc`).then((r:any[])=>{const rows=Array.isArray(r)?r:[];setMyHist(rows);if(hasNewComment(rows,user.name)){}setTimeout(()=>setSeenAt(user.name),500);});}}}>
               {v}
+              {k==="history"&&hasNewComment(myHist,user.name)&&<span style={{position:"absolute",top:8,right:6,width:8,height:8,borderRadius:"50%",background:PC.danger,display:"inline-block"}}/>}
             </button>
           ))}
         </div>
@@ -806,7 +815,18 @@ export default function App(){
         {tab==="history"&&(
           myHist.length===0
             ?<div style={{textAlign:"center",padding:"3rem 0",color:PC.textSub,fontSize:14}}>아직 저장된 기록이 없습니다.</div>
-            :<HistoryList records={myHist} onUpdate={handleMyHistUpdate}/>
+            :<>
+              {hasNewComment(myHist,user.name)&&(
+                <div style={{background:"#fff3cd",border:"1px solid #ffc107",borderRadius:10,padding:"12px 16px",marginBottom:12,display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontSize:18}}>💬</span>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:14,color:"#856404"}}>원장님의 새 코멘트가 있습니다!</div>
+                    <div style={{fontSize:12,color:"#856404",marginTop:2}}>아래 기록에서 확인하세요</div>
+                  </div>
+                </div>
+              )}
+              <HistoryList records={myHist} onUpdate={handleMyHistUpdate}/>
+            </>
         )}
       </div>
     </div>
