@@ -454,6 +454,7 @@ export default function App(){
   const [myHist,setMyHist]=useState<any[]>([]);
   const [allHist,setAllHist]=useState<any[]>([]);
   const [adminStu,setAdminStu]=useState("");
+  const [adminSearch,setAdminSearch]=useState("");
 
   const [laps,setLaps]=useState<{m:string,s:string}[]>(Array(6).fill(null).map(()=>({m:"",s:""})));
   const updateLap=(i:number,field:"m"|"s",v:string)=>setLaps(prev=>prev.map((l,idx)=>idx===i?{...l,[field]:v}:l));
@@ -610,17 +611,43 @@ export default function App(){
         </div>
       </div>
       <div style={{padding:"1.25rem"}}>
-        <div style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
           <span style={{fontSize:13,color:PC.textSub}}>총 <b style={{color:PC.text}}>{stuNames.length}명</b> · <b style={{color:PC.text}}>{allHist.length}개</b> 기록</span>
         </div>
         {stuNames.length===0?<div style={{textAlign:"center",color:PC.textSub,padding:"3rem 0"}}>아직 기록이 없습니다.</div>:(
-          <>
-            <select value={activeStu} onChange={e=>setAdminStu(e.target.value)} style={{...inSt,marginBottom:14}}>
-              {stuNames.map(n=><option key={n as string} value={n as string}>{n as string}</option>)}
-            </select>
-            <HistoryList records={allHist.filter(h=>h.student_name===activeStu)} onUpdate={handleAllHistUpdate} isAdmin={true}/>
-          </>
-        )}
+          ()=>{
+            const filteredNames=stuNames.filter(n=>(n as string).includes(adminSearch));
+            const activeName=filteredNames.includes(activeStu)?activeStu:(filteredNames[0]||"");
+            return(
+              <>
+                <div style={{position:"relative",marginBottom:8}}>
+                  <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:15,pointerEvents:"none"}}>🔍</span>
+                  <input
+                    placeholder="이름으로 검색..."
+                    value={adminSearch}
+                    onChange={e=>{setAdminSearch(e.target.value);setAdminStu("");}}
+                    style={{...inSt,paddingLeft:36}}
+                  />
+                  {adminSearch&&<button onClick={()=>{setAdminSearch("");setAdminStu("");}} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",fontSize:16,cursor:"pointer",color:PC.textSub}}>✕</button>}
+                </div>
+                {filteredNames.length===0
+                  ?<div style={{textAlign:"center",color:PC.textSub,padding:"2rem 0",fontSize:14}}>"{adminSearch}" 검색 결과가 없습니다.</div>
+                  :<>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+                      {filteredNames.map(n=>(
+                        <button key={n as string} onClick={()=>setAdminStu(n as string)}
+                          style={{padding:"6px 14px",borderRadius:20,border:`1.5px solid ${activeName===n?PC.primary:PC.border}`,background:activeName===n?PC.primary:PC.white,color:activeName===n?PC.white:PC.text,fontSize:13,fontWeight:activeName===n?700:400,cursor:"pointer"}}>
+                          {n as string}
+                        </button>
+                      ))}
+                    </div>
+                    <HistoryList records={allHist.filter(h=>h.student_name===activeName)} onUpdate={handleAllHistUpdate} isAdmin={true}/>
+                  </>
+                }
+              </>
+            );
+          }
+        )()}
       </div>
     </div>
   );
