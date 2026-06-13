@@ -39,11 +39,15 @@ async function dbPost(t:string,b:any){
   if(!r.ok) throw new Error(JSON.stringify(data));
   return data;
 }
-async function dbPatch(t:string,id:number,b:any){
+async function dbPatch(t:string,id:string,b:any){
   const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}?id=eq.${id}`,{method:"PATCH",headers:{...H,Prefer:"return=representation"},body:JSON.stringify(b)});
   const data=await r.json();
   if(!r.ok) throw new Error(JSON.stringify(data));
   return data;
+}
+async function dbDelete(t:string,id:string){
+  const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}?id=eq.${id}`,{method:"DELETE",headers:H});
+  if(!r.ok){ const data=await r.json(); throw new Error(JSON.stringify(data)); }
 }
 
 function getSeenAt(name:string){ return localStorage.getItem(`seen_comment_${name}`)||""; }
@@ -453,6 +457,7 @@ export default function App(){
   const [recDate,setRecDate]=useState(todayISO());
   const [myHist,setMyHist]=useState<any[]>([]);
   const [allHist,setAllHist]=useState<any[]>([]);
+  const [allStudents,setAllStudents]=useState<any[]>([]);
   const [adminStu,setAdminStu]=useState("");
   const [adminSearch,setAdminSearch]=useState("");
 
@@ -505,16 +510,23 @@ export default function App(){
     setLoading(true);setLoginErr("");
     if(loginPw===MASTER_PW){
       setUser({name:"원장님",isAdmin:true});
-      const rows=await dbGet("records","order=created_at.desc");
+      const [rows,stus]=await Promise.all([
+        dbGet("records","order=created_at.desc"),
+        dbGet("students","order=created_at.desc"),
+      ]);
       setAllHist(Array.isArray(rows)?rows:[]);
+      setAllStudents(Array.isArray(stus)?stus:[]);
       setScreen("admin");setLoading(false);return;
     }
     try{
       const existing=await dbGet("students",`name=eq.${encodeURIComponent(loginName.trim())}`);
       if(existing.length>0){
         if(existing[0].password!==loginPw){setLoginErr("비밀번호가 틀렸어요");setLoading(false);return;}
+        if(existing[0].status==="pending"){setLoginErr("승인 대기 중입니다. 원장님께 문의하세요.");setLoading(false);return;}
       } else {
-        await dbPost("students",{name:loginName.trim(),password:loginPw});
+        await dbPost("students",{name:loginName.trim(),password:loginPw,status:"pending"});
+        setLoginErr("✅ 가입 신청이 완료됐습니다. 원장님 승인 후 이용 가능합니다.");
+        setLoading(false);return;
       }
       setUser({name:loginName.trim(),password:loginPw});
       const all=await dbGet("records",`student_name=eq.${encodeURIComponent(loginName.trim())}&order=created_at.desc`);
@@ -572,7 +584,9 @@ export default function App(){
     setAllHist(prev=>prev.map(r=>r.id===updated.id?updated:r));
   };
 
-  const stuNames=[...new Set(allHist.map((h:any)=>h.student_name))];
+  const approvedStudents=allStudents.filter(s=>s.status==="approved"||!s.status);
+  const pendingStudents=allStudents.filter(s=>s.status==="pending");
+  const stuNames=approvedStudents.map(s=>s.name);
   const activeStu=adminStu||stuNames[0]||"";
 
   if(screen==="login") return(
@@ -585,13 +599,13 @@ export default function App(){
         </div>
         <div style={{...card,padding:"1.5rem"}}>
           <div style={{fontSize:13,color:PC.textSub,textAlign:"center",marginBottom:16,background:PC.borderLight,borderRadius:8,padding:"8px"}}>
-            처음 오신 분은 이름+비밀번호 입력하면 <b>자동 가입</b>돼요
+            처음 오신 분은 가입 신청 후 <b>원장님 승인</b> 이후 이용 가능해요
           </div>
           <label style={{fontSize:13,color:PC.textSub,marginBottom:4,display:"block",fontWeight:500}}>이름</label>
           <input style={{...inSt,marginBottom:12}} placeholder="이름 입력" value={loginName} onChange={e=>setLoginName(e.target.value)}/>
           <label style={{fontSize:13,color:PC.textSub,marginBottom:4,display:"block",fontWeight:500}}>비밀번호</label>
           <input type="password" style={inSt} placeholder="비밀번호 입력" value={loginPw} onChange={e=>setLoginPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
-          {loginErr&&<p style={{fontSize:13,color:PC.danger,marginTop:8,marginBottom:0}}>{loginErr}</p>}
+          {loginErr&&<p style={{fontSize:13,color:loginErr.startsWith("✅")?PC.success:PC.danger,marginTop:8,marginBottom:0}}>{loginErr}</p>}
         </div>
         <button onClick={handleLogin} disabled={loading} style={{...btnPrimary,marginTop:8}}>{loading?"확인 중...":"로그인 / 가입"}</button>
         <p style={{fontSize:12,color:PC.textLight,textAlign:"center",marginTop:16}}>원장님은 마스터 비밀번호로 로그인하세요</p>
@@ -611,43 +625,73 @@ export default function App(){
         </div>
       </div>
       <div style={{padding:"1.25rem"}}>
+        {/* 통계 */}
         <div style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-          <span style={{fontSize:13,color:PC.textSub}}>총 <b style={{color:PC.text}}>{stuNames.length}명</b> · <b style={{color:PC.text}}>{allHist.length}개</b> 기록</span>
+          <span style={{fontSize:13,color:PC.textSub}}>승인 <b style={{color:PC.text}}>{approvedStudents.length}명</b> · 기록 <b style={{color:PC.text}}>{allHist.length}개</b></span>
+          {pendingStudents.length>0&&<span style={{background:PC.danger,color:PC.white,borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:700}}>대기 {pendingStudents.length}명</span>}
         </div>
-        {stuNames.length===0?<div style={{textAlign:"center",color:PC.textSub,padding:"3rem 0"}}>아직 기록이 없습니다.</div>:(
-          ()=>{
-            const filteredNames=stuNames.filter(n=>(n as string).includes(adminSearch));
-            const activeName=filteredNames.includes(activeStu)?activeStu:(filteredNames[0]||"");
-            return(
-              <>
-                <div style={{position:"relative",marginBottom:8}}>
-                  <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:15,pointerEvents:"none"}}>🔍</span>
-                  <input
-                    placeholder="이름으로 검색..."
-                    value={adminSearch}
-                    onChange={e=>{setAdminSearch(e.target.value);setAdminStu("");}}
-                    style={{...inSt,paddingLeft:36}}
-                  />
-                  {adminSearch&&<button onClick={()=>{setAdminSearch("");setAdminStu("");}} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",fontSize:16,cursor:"pointer",color:PC.textSub}}>✕</button>}
+
+        {/* 승인 대기 섹션 */}
+        {pendingStudents.length>0&&(
+          <div style={{...card,border:`1.5px solid ${PC.danger}30`,marginBottom:14}}>
+            <div style={{fontWeight:700,fontSize:14,color:PC.danger,marginBottom:10}}>⏳ 승인 대기 중</div>
+            {pendingStudents.map((s:any)=>(
+              <div key={s.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${PC.borderLight}`}}>
+                <span style={{fontSize:14,fontWeight:600,color:PC.text}}>{s.name}</span>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={async()=>{
+                    await dbPatch("students",s.id,{status:"approved"});
+                    setAllStudents(prev=>prev.map(x=>x.id===s.id?{...x,status:"approved"}:x));
+                  }} style={{padding:"5px 12px",borderRadius:8,border:"none",background:PC.success,color:PC.white,fontSize:13,fontWeight:700,cursor:"pointer"}}>✓ 승인</button>
+                  <button onClick={async()=>{
+                    if(!confirm(`${s.name}님의 가입을 거절할까요?`))return;
+                    await dbDelete("students",s.id);
+                    setAllStudents(prev=>prev.filter(x=>x.id!==s.id));
+                  }} style={{padding:"5px 12px",borderRadius:8,border:"none",background:PC.dangerLight,color:PC.danger,fontSize:13,fontWeight:700,cursor:"pointer"}}>✕ 거절</button>
                 </div>
-                {filteredNames.length===0
-                  ?<div style={{textAlign:"center",color:PC.textSub,padding:"2rem 0",fontSize:14}}>"{adminSearch}" 검색 결과가 없습니다.</div>
-                  :<>
-                    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
-                      {filteredNames.map(n=>(
-                        <button key={n as string} onClick={()=>setAdminStu(n as string)}
-                          style={{padding:"6px 14px",borderRadius:20,border:`1.5px solid ${activeName===n?PC.primary:PC.border}`,background:activeName===n?PC.primary:PC.white,color:activeName===n?PC.white:PC.text,fontSize:13,fontWeight:activeName===n?700:400,cursor:"pointer"}}>
-                          {n as string}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 승인된 회원 목록 */}
+        {(()=>{
+          const filteredStudents=approvedStudents.filter(s=>s.name.includes(adminSearch));
+          const activeName=filteredStudents.find(s=>s.name===activeStu)?activeStu:(filteredStudents[0]?.name||"");
+          return(
+            <>
+              <div style={{position:"relative",marginBottom:8}}>
+                <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:15,pointerEvents:"none"}}>🔍</span>
+                <input placeholder="이름으로 검색..." value={adminSearch}
+                  onChange={e=>{setAdminSearch(e.target.value);setAdminStu("");}}
+                  style={{...inSt,paddingLeft:36}}/>
+                {adminSearch&&<button onClick={()=>{setAdminSearch("");setAdminStu("");}} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",fontSize:16,cursor:"pointer",color:PC.textSub}}>✕</button>}
+              </div>
+              {filteredStudents.length===0
+                ?<div style={{textAlign:"center",color:PC.textSub,padding:"2rem 0",fontSize:14}}>{adminSearch?`"${adminSearch}" 검색 결과가 없습니다.`:"아직 승인된 회원이 없습니다."}</div>
+                :<>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+                    {filteredStudents.map((s:any)=>(
+                      <div key={s.id} style={{display:"flex",alignItems:"center",gap:2}}>
+                        <button onClick={()=>setAdminStu(s.name)}
+                          style={{padding:"6px 12px",borderRadius:20,border:`1.5px solid ${activeName===s.name?PC.primary:PC.border}`,background:activeName===s.name?PC.primary:PC.white,color:activeName===s.name?PC.white:PC.text,fontSize:13,fontWeight:activeName===s.name?700:400,cursor:"pointer"}}>
+                          {s.name}
                         </button>
-                      ))}
-                    </div>
-                    <HistoryList records={allHist.filter(h=>h.student_name===activeName)} onUpdate={handleAllHistUpdate} isAdmin={true}/>
-                  </>
-                }
-              </>
-            );
-          }
-        )()}
+                        <button onClick={async()=>{
+                          if(!confirm(`${s.name}님을 탈퇴시킬까요?\n기록은 유지됩니다.`))return;
+                          await dbDelete("students",s.id);
+                          setAllStudents(prev=>prev.filter(x=>x.id!==s.id));
+                          if(adminStu===s.name)setAdminStu("");
+                        }} style={{padding:"3px 6px",borderRadius:8,border:"none",background:"none",color:PC.textLight,fontSize:13,cursor:"pointer"}} title="탈퇴">🗑️</button>
+                      </div>
+                    ))}
+                  </div>
+                  {activeName&&<HistoryList records={allHist.filter(h=>h.student_name===activeName)} onUpdate={handleAllHistUpdate} isAdmin={true}/>}
+                </>
+              }
+            </>
+          );
+        })()}
       </div>
     </div>
   );
