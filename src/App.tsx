@@ -584,7 +584,11 @@ export default function App(){
     setAllHist(prev=>prev.map(r=>r.id===updated.id?updated:r));
   };
 
-  const approvedStudents=allStudents.filter(s=>s.status==="approved"||!s.status);
+  const approvedStudents=allStudents.filter(s=>s.status==="approved"||!s.status).sort((a,b)=>{
+    const la=allHist.filter(r=>r.student_name===a.name).map(r=>r.created_at).sort().pop()||"";
+    const lb=allHist.filter(r=>r.student_name===b.name).map(r=>r.created_at).sort().pop()||"";
+    return lb.localeCompare(la);
+  });
   const pendingStudents=allStudents.filter(s=>s.status==="pending");
   const stuNames=approvedStudents.map(s=>s.name);
   const activeStu=adminStu||stuNames[0]||"";
