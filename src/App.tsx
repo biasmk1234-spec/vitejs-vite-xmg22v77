@@ -748,9 +748,20 @@ export default function App(){
                 );
               })}
               {obstacleTotalSec>0&&(
-                <div style={{marginTop:8,background:PC.borderLight,borderRadius:8,padding:"8px 12px",display:"flex",justifyContent:"space-between"}}>
-                  <span style={{fontSize:13,color:PC.textSub}}>장애물 총시간</span>
-                  <span style={{fontWeight:700,fontSize:14,color:PC.text}}>{secToDisplay(obstacleTotalSec)}</span>
+                <div style={{marginTop:8,background:PC.borderLight,borderRadius:8,padding:"8px 12px"}}>
+                  <div style={{display:"flex",justifyContent:"space-between"}}>
+                    <span style={{fontSize:13,color:PC.textSub}}>장애물 총시간</span>
+                    <span style={{fontWeight:700,fontSize:14,color:PC.text}}>{secToDisplay(obstacleTotalSec)}</span>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
+                    <span style={{fontSize:12,color:PC.textSub}}>랩 평균</span>
+                    <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                      <span style={{fontSize:13,color:PC.textSub}}>{secToDisplay(Math.round(obstacleTotalSec/6))}/랩</span>
+                      {lapSecs[0]>0&&(Math.round(obstacleTotalSec/6)-lapSecs[0])>=2&&(
+                        <span style={{fontSize:11,background:"#fff3cd",color:"#856404",borderRadius:20,padding:"2px 8px",fontWeight:600}}>⚠️ 오버페이스</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -850,15 +861,26 @@ export default function App(){
                   {tcb&&<Bdg {...tcb}/>}
                 </div>
               </div>
-              {obs.length>0&&(
-                <div style={card}>
-                  <div style={{fontWeight:700,fontSize:14,color:PC.text,marginBottom:10}}>🏃 장애물달리기 랩 기록</div>
-                  {obs.map((cum:number,i:number)=>{
-                    const p=i>0?obs[i-1]:0; const interval=cum-p;
-                    return(<div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><span style={{fontSize:13,fontWeight:600,color:PC.primary}}>{i+1}R</span><div style={{display:"flex",gap:8}}><span style={{fontSize:13}}>구간 {secToDisplay(interval)}</span><span style={{fontSize:12,color:PC.textSub}}>누적 {secToDisplay(cum)}</span></div></div>);
-                  })}
-                </div>
-              )}
+              {obs.length>0&&(()=>{
+                const avgSec=Math.round(obs[obs.length-1]/obs.length);
+                const isOverpace=avgSec>0&&obs[0]>0&&(avgSec-obs[0])>=2;
+                return(
+                  <div style={card}>
+                    <div style={{fontWeight:700,fontSize:14,color:PC.text,marginBottom:10}}>🏃 장애물달리기 랩 기록</div>
+                    {obs.map((cum:number,i:number)=>{
+                      const p=i>0?obs[i-1]:0; const interval=cum-p;
+                      return(<div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><span style={{fontSize:13,fontWeight:600,color:PC.primary}}>{i+1}R</span><div style={{display:"flex",gap:8}}><span style={{fontSize:13}}>구간 {secToDisplay(interval)}</span><span style={{fontSize:12,color:PC.textSub}}>누적 {secToDisplay(cum)}</span></div></div>);
+                    })}
+                    <div style={{marginTop:8,borderTop:`1px solid ${PC.border||"#e5e7eb"}`,paddingTop:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span style={{fontSize:13,color:PC.textSub}}>랩 평균</span>
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        <span style={{fontSize:13,fontWeight:600,color:PC.text}}>{secToDisplay(avgSec)}/랩</span>
+                        {isOverpace&&<span style={{fontSize:11,background:"#fff3cd",color:"#856404",borderRadius:20,padding:"2px 8px",fontWeight:600}}>⚠️ 오버페이스</span>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
               <div style={{fontSize:11,fontWeight:700,color:PC.textSub,margin:"16px 0 8px",textTransform:"uppercase" as const,letterSpacing:"0.6px"}}>코스별 결과</div>
               {INOUT_COURSES.map(c=>{
                 const sec=submitted.inout_times?.[c.id]?.elapsed||0;
