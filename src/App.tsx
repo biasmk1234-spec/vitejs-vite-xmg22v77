@@ -361,6 +361,7 @@ function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated
                 const interval=lap-prev_lap;
                 return(<span key={i} style={{fontSize:11,background:PC.borderLight,borderRadius:6,padding:"2px 7px",color:PC.textSub}}>{i+1}R {secToDisplay(interval)} <span style={{color:PC.textLight}}>({secToDisplay(lap)})</span></span>);
               })}
+              {(()=>{const avg=Math.round(obs[obs.length-1]/obs.length);const overpace=obs[0]>0&&(avg-obs[0])>=2;return(<span style={{fontSize:11,background:overpace?"#fff3cd":PC.primaryLight,borderRadius:6,padding:"2px 7px",color:overpace?"#856404":PC.primaryDark,fontWeight:600}}>평균 {secToDisplay(avg)}/랩{overpace?" ⚠️ 오버페이스":""}</span>);})()}
             </div>
           </div>
         )}
