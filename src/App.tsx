@@ -361,7 +361,7 @@ function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated
                 const interval=lap-prev_lap;
                 return(<span key={i} style={{fontSize:11,background:PC.borderLight,borderRadius:6,padding:"2px 7px",color:PC.textSub}}>{i+1}R {secToDisplay(interval)} <span style={{color:PC.textLight}}>({secToDisplay(lap)})</span></span>);
               })}
-              {(()=>{const avg=Math.round(obs[obs.length-1]/obs.length);const overpace=obs[0]>0&&(avg-obs[0])>=2;return(<span style={{fontSize:11,background:overpace?"#fff3cd":PC.primaryLight,borderRadius:6,padding:"2px 7px",color:overpace?"#856404":PC.primaryDark,fontWeight:600}}>평균 {secToDisplay(avg)}/랩{overpace?" ⚠️ 오버페이스":""}</span>);})()}
+              {(()=>{const avg=Math.round(obs[obs.length-1]/obs.length);const overpace=obs[0]>0&&(avg-obs[0])>=3;return(<span style={{fontSize:11,background:overpace?"#fff3cd":PC.primaryLight,borderRadius:6,padding:"2px 7px",color:overpace?"#856404":PC.primaryDark,fontWeight:600}}>평균 {secToDisplay(avg)}/랩{overpace?" ⚠️ 오버페이스":""}</span>);})()}
             </div>
           </div>
         )}
@@ -758,7 +758,7 @@ export default function App(){
                     <span style={{fontSize:12,color:PC.textSub}}>랩 평균</span>
                     <div style={{display:"flex",gap:6,alignItems:"center"}}>
                       <span style={{fontSize:13,color:PC.textSub}}>{secToDisplay(Math.round(obstacleTotalSec/6))}/랩</span>
-                      {lapSecs[0]>0&&(Math.round(obstacleTotalSec/6)-lapSecs[0])>=2&&(
+                      {lapSecs[0]>0&&(Math.round(obstacleTotalSec/6)-lapSecs[0])>=3&&(
                         <span style={{fontSize:11,background:"#fff3cd",color:"#856404",borderRadius:20,padding:"2px 8px",fontWeight:600}}>⚠️ 오버페이스</span>
                       )}
                     </div>
@@ -864,7 +864,7 @@ export default function App(){
               </div>
               {obs.length>0&&(()=>{
                 const avgSec=Math.round(obs[obs.length-1]/obs.length);
-                const isOverpace=avgSec>0&&obs[0]>0&&(avgSec-obs[0])>=2;
+                const isOverpace=avgSec>0&&obs[0]>0&&(avgSec-obs[0])>=3;
                 return(
                   <div style={card}>
                     <div style={{fontWeight:700,fontSize:14,color:PC.text,marginBottom:10}}>🏃 장애물달리기 랩 기록</div>
