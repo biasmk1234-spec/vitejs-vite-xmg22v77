@@ -683,6 +683,12 @@ export default function App(){
                           {s.name}
                         </button>
                         <button onClick={async()=>{
+                          const newPw=prompt(`${s.name}님의 새 비밀번호를 입력하세요:`);
+                          if(!newPw||!newPw.trim())return;
+                          await dbPatch("students",s.id,{password:newPw.trim()});
+                          alert(`${s.name}님 비밀번호가 변경됐습니다.`);
+                        }} style={{padding:"3px 6px",borderRadius:8,border:"none",background:"none",color:PC.textSub,fontSize:13,cursor:"pointer"}} title="비밀번호 초기화">🔑</button>
+                        <button onClick={async()=>{
                           if(!confirm(`${s.name}님을 탈퇴시킬까요?\n기록은 유지됩니다.`))return;
                           await dbDelete("students",s.id);
                           setAllStudents(prev=>prev.filter(x=>x.id!==s.id));
