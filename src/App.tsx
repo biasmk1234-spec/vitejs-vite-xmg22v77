@@ -465,6 +465,7 @@ export default function App(){
   const [classes,setClasses]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("bias_classes")||"[]");}catch{return [];}});
   const [dragStudentId,setDragStudentId]=useState<string|null>(null);
   const [dragOverClass,setDragOverClass]=useState<string|null>(null);
+  const [classViewStu,setClassViewStu]=useState<string|null>(null);
   const saveClasses=(list:string[])=>{setClasses(list);localStorage.setItem("bias_classes",JSON.stringify(list));};
   const moveStudentToClass=async(studentId:string,className:string|null)=>{
     await dbPatch("students",studentId,{class_name:className});
@@ -709,7 +710,8 @@ export default function App(){
                           <div key={s.id} draggable
                             onDragStart={e=>{e.dataTransfer.effectAllowed="move";setDragStudentId(s.id);}}
                             onDragEnd={()=>{setDragStudentId(null);setDragOverClass(null);}}
-                            style={{fontSize:12,padding:"4px 10px",borderRadius:20,background:PC.borderLight,color:PC.text,cursor:"grab",userSelect:"none",border:`1px solid ${PC.border}`,opacity:dragStudentId===s.id?0.4:1}}>
+                            onClick={()=>setClassViewStu(prev=>prev===s.name?null:s.name)}
+                            style={{fontSize:12,padding:"4px 10px",borderRadius:20,background:classViewStu===s.name?PC.primary:PC.borderLight,color:classViewStu===s.name?PC.white:PC.text,cursor:"pointer",userSelect:"none",border:`1px solid ${classViewStu===s.name?PC.primary:PC.border}`,opacity:dragStudentId===s.id?0.4:1}}>
                             {s.name}
                           </div>
                         ))}
@@ -719,6 +721,15 @@ export default function App(){
                   );
                 })}
               </div>
+              {classViewStu&&(
+                <div style={{marginTop:16,...card}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <span style={{fontWeight:700,fontSize:14,color:PC.text}}>{classViewStu}님 기록</span>
+                    <button onClick={()=>setClassViewStu(null)} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:PC.textSub}}>✕</button>
+                  </div>
+                  <HistoryList records={allHist.filter(h=>h.student_name===classViewStu)} onUpdate={handleAllHistUpdate} isAdmin={true}/>
+                </div>
+              )}
             </div>
           );
         })()}
