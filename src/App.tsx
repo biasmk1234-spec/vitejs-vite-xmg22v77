@@ -721,15 +721,6 @@ export default function App(){
                   );
                 })}
               </div>
-              {classViewStu&&(
-                <div style={{marginTop:16,...card}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                    <span style={{fontWeight:700,fontSize:14,color:PC.text}}>{classViewStu}님 기록</span>
-                    <button onClick={()=>setClassViewStu(null)} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:PC.textSub}}>✕</button>
-                  </div>
-                  <HistoryList records={allHist.filter(h=>h.student_name===classViewStu)} onUpdate={handleAllHistUpdate} isAdmin={true}/>
-                </div>
-              )}
             </div>
           );
         })()}
@@ -802,6 +793,19 @@ export default function App(){
           );
         })()}
       </div>
+      {classViewStu&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1000,display:"flex",alignItems:"flex-start",justifyContent:"center",paddingTop:60,overflowY:"auto"}}
+          onClick={()=>setClassViewStu(null)}>
+          <div style={{background:PC.white,borderRadius:16,width:"min(680px,94vw)",maxHeight:"80vh",overflowY:"auto",padding:"1.25rem",margin:"0 1rem 2rem"}}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <span style={{fontWeight:700,fontSize:15,color:PC.text}}>{classViewStu}님 기록</span>
+              <button onClick={()=>setClassViewStu(null)} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:PC.textSub}}>✕</button>
+            </div>
+            <HistoryList records={allHist.filter(h=>h.student_name===classViewStu)} onUpdate={handleAllHistUpdate} isAdmin={true}/>
+          </div>
+        </div>
+      )}
     </div>
   );
 
