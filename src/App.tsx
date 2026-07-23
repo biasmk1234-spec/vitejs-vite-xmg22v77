@@ -461,6 +461,15 @@ export default function App(){
   const [allStudents,setAllStudents]=useState<any[]>([]);
   const [adminStu,setAdminStu]=useState("");
   const [adminSearch,setAdminSearch]=useState("");
+  const [adminTab,setAdminTab]=useState<"records"|"classes">("records");
+  const [classes,setClasses]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("bias_classes")||"[]");}catch{return [];}});
+  const [dragStudentId,setDragStudentId]=useState<string|null>(null);
+  const [dragOverClass,setDragOverClass]=useState<string|null>(null);
+  const saveClasses=(list:string[])=>{setClasses(list);localStorage.setItem("bias_classes",JSON.stringify(list));};
+  const moveStudentToClass=async(studentId:string,className:string|null)=>{
+    await dbPatch("students",studentId,{class_name:className});
+    setAllStudents(prev=>prev.map(s=>s.id===studentId?{...s,class_name:className}:s));
+  };
 
   const [laps,setLaps]=useState<{m:string,s:string}[]>(Array(6).fill(null).map(()=>({m:"",s:""})));
   const updateLap=(i:number,field:"m"|"s",v:string)=>setLaps(prev=>prev.map((l,idx)=>idx===i?{...l,[field]:v}:l));
@@ -624,10 +633,19 @@ export default function App(){
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingTop:"1rem",paddingBottom:"0.75rem"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <LogoBox/>
-            <div><div style={{fontSize:15,fontWeight:800,color:PC.text}}>{APP_TITLE}</div><div style={{fontSize:12,color:PC.textSub}}>관리자 전체 기록</div></div>
+            <div><div style={{fontSize:15,fontWeight:800,color:PC.text}}>{APP_TITLE}</div><div style={{fontSize:12,color:PC.textSub}}>관리자</div></div>
           </div>
           <button onClick={()=>{setScreen("login");setLoginName("");setLoginPw("");}} style={{fontSize:13,color:PC.textSub,background:PC.white,border:`1px solid ${PC.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer"}}>로그아웃</button>
         </div>
+      </div>
+      {/* 관리자 탭 */}
+      <div style={{display:"flex",gap:0,padding:"0 1.25rem",borderBottom:`1px solid ${PC.border}`,background:PC.white}}>
+        {(["records","classes"] as const).map(t=>(
+          <button key={t} onClick={()=>setAdminTab(t)}
+            style={{padding:"10px 18px",border:"none",background:"none",fontSize:13,fontWeight:adminTab===t?700:400,color:adminTab===t?PC.primary:PC.textSub,borderBottom:adminTab===t?`2px solid ${PC.primary}`:"2px solid transparent",cursor:"pointer",marginBottom:-1}}>
+            {t==="records"?"📋 전체 기록":"🏫 반 관리"}
+          </button>
+        ))}
       </div>
       <div style={{padding:"1.25rem"}}>
         {/* 통계 */}
@@ -636,8 +654,77 @@ export default function App(){
           {pendingStudents.length>0&&<span style={{background:PC.danger,color:PC.white,borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:700}}>대기 {pendingStudents.length}명</span>}
         </div>
 
+        {/* 반 관리 탭 */}
+        {adminTab==="classes"&&(()=>{
+          const allBoxes=[...classes,"__미배정__"];
+          return(
+            <div>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+                <button onClick={()=>{
+                  const name=prompt("새 반 이름을 입력하세요:");
+                  if(!name||!name.trim())return;
+                  if(classes.includes(name.trim())){alert("이미 있는 반 이름입니다.");return;}
+                  saveClasses([...classes,name.trim()]);
+                }} style={{padding:"7px 16px",borderRadius:20,border:`1.5px solid ${PC.primary}`,background:PC.white,color:PC.primary,fontSize:13,fontWeight:700,cursor:"pointer"}}>+ 반 추가</button>
+                <span style={{fontSize:12,color:PC.textSub}}>학생 칩을 드래그해서 반으로 옮기세요</span>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12}}>
+                {allBoxes.map(cls=>{
+                  const isUnassigned=cls==="__미배정__";
+                  const label=isUnassigned?"미배정":cls;
+                  const students=approvedStudents.filter((s:any)=>isUnassigned?(s.class_name==null||s.class_name===""):s.class_name===cls);
+                  const isOver=dragOverClass===cls;
+                  return(
+                    <div key={cls}
+                      onDragOver={e=>{e.preventDefault();setDragOverClass(cls);}}
+                      onDragLeave={()=>setDragOverClass(null)}
+                      onDrop={async()=>{
+                        if(!dragStudentId)return;
+                        await moveStudentToClass(dragStudentId,isUnassigned?null:cls);
+                        setDragStudentId(null);setDragOverClass(null);
+                      }}
+                      style={{background:isOver?PC.primaryLight:PC.white,border:`2px solid ${isOver?PC.primary:isUnassigned?"#d1d5db":PC.border}`,borderRadius:12,padding:"12px",minHeight:120,transition:"all 0.15s"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                        <span style={{fontSize:13,fontWeight:700,color:isUnassigned?PC.textSub:PC.text}}>{label} <span style={{fontWeight:400,color:PC.textLight}}>({students.length}명)</span></span>
+                        {!isUnassigned&&(
+                          <div style={{display:"flex",gap:4}}>
+                            <button onClick={()=>{
+                              const newName=prompt("반 이름 수정:",cls);
+                              if(!newName||!newName.trim()||newName.trim()===cls)return;
+                              if(classes.includes(newName.trim())){alert("이미 있는 반 이름입니다.");return;}
+                              const updated=classes.map(c=>c===cls?newName.trim():c);
+                              saveClasses(updated);
+                              setAllStudents(prev=>prev.map(s=>s.class_name===cls?{...s,class_name:newName.trim()}:s));
+                              approvedStudents.filter((s:any)=>s.class_name===cls).forEach((s:any)=>dbPatch("students",s.id,{class_name:newName.trim()}));
+                            }} style={{fontSize:11,padding:"2px 6px",borderRadius:6,border:`1px solid ${PC.border}`,background:"none",cursor:"pointer",color:PC.textSub}}>수정</button>
+                            {students.length===0&&<button onClick={()=>{
+                              if(!confirm(`"${cls}" 반을 삭제할까요?`))return;
+                              saveClasses(classes.filter(c=>c!==cls));
+                            }} style={{fontSize:11,padding:"2px 6px",borderRadius:6,border:`1px solid ${PC.border}`,background:"none",cursor:"pointer",color:PC.danger}}>삭제</button>}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                        {students.map((s:any)=>(
+                          <div key={s.id} draggable
+                            onDragStart={e=>{e.dataTransfer.effectAllowed="move";setDragStudentId(s.id);}}
+                            onDragEnd={()=>{setDragStudentId(null);setDragOverClass(null);}}
+                            style={{fontSize:12,padding:"4px 10px",borderRadius:20,background:PC.borderLight,color:PC.text,cursor:"grab",userSelect:"none",border:`1px solid ${PC.border}`,opacity:dragStudentId===s.id?0.4:1}}>
+                            {s.name}
+                          </div>
+                        ))}
+                        {students.length===0&&<span style={{fontSize:12,color:PC.textLight,padding:"4px 0"}}>여기에 드롭하세요</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* 승인 대기 섹션 */}
-        {pendingStudents.length>0&&(
+        {adminTab==="records"&&pendingStudents.length>0&&(
           <div style={{...card,border:`1.5px solid ${PC.danger}30`,marginBottom:14}}>
             <div style={{fontWeight:700,fontSize:14,color:PC.danger,marginBottom:10}}>⏳ 승인 대기 중</div>
             {pendingStudents.map((s:any)=>(
@@ -660,7 +747,7 @@ export default function App(){
         )}
 
         {/* 승인된 회원 목록 */}
-        {(()=>{
+        {adminTab==="records"&&(()=>{
           const filteredStudents=approvedStudents.filter(s=>s.name.includes(adminSearch));
           const activeName=filteredStudents.find(s=>s.name===activeStu)?activeStu:(filteredStudents[0]?.name||"");
           return(
