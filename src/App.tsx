@@ -352,19 +352,43 @@ function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated
             <button onClick={()=>setEditing(true)} style={{background:PC.borderLight,border:"none",borderRadius:8,padding:"4px 10px",fontSize:12,color:PC.textSub,cursor:"pointer",fontWeight:600}}>✏️ 수정</button>
           </div>
         </div>
-        {obs.length>0&&obs[obs.length-1]>0&&(
-          <div style={{marginBottom:8}}>
-            <div style={{fontSize:12,fontWeight:600,color:PC.textSub,marginBottom:4}}>🏃 장애물달리기</div>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              {obs.map((lap:number,i:number)=>{
-                const prev_lap=i>0?obs[i-1]:0;
-                const interval=lap-prev_lap;
-                return(<span key={i} style={{fontSize:11,background:PC.borderLight,borderRadius:6,padding:"2px 7px",color:PC.textSub}}>{i+1}R {secToDisplay(interval)} <span style={{color:PC.textLight}}>({secToDisplay(lap)})</span></span>);
-              })}
-              {(()=>{const avg=Math.round(obs[obs.length-1]/obs.length);const overpace=obs[0]>0&&(avg-obs[0])>=3;return(<span style={{fontSize:11,background:overpace?"#fff3cd":PC.primaryLight,borderRadius:6,padding:"2px 7px",color:overpace?"#856404":PC.primaryDark,fontWeight:600}}>평균 {secToDisplay(avg)}/랩{overpace?" ⚠️ 오버페이스":""}</span>);})()}
+        {obs.length>0&&obs[obs.length-1]>0&&(()=>{
+          const intervals=obs.map((v:number,i:number)=>i===0?v:v-obs[i-1]);
+          const maxVal=Math.max(...intervals);
+          const avg=Math.round(obs[obs.length-1]/obs.length);
+          const overpace=obs[0]>0&&(avg-obs[0])>=3;
+          const W=280,H=70,pad=18,gap=(W-pad*2)/6,barW=gap*0.55;
+          return(
+            <div style={{marginBottom:8}}>
+              <div style={{fontSize:12,fontWeight:600,color:PC.textSub,marginBottom:4}}>🏃 장애물달리기</div>
+              <svg width="100%" viewBox={`0 0 ${W} ${H+26}`} style={{display:"block",marginBottom:6}}>
+                {intervals.map((v:number,i:number)=>{
+                  const barH=maxVal>0?(v/maxVal)*(H-10):0;
+                  const x=pad+gap*i+gap*0.225;
+                  const y=H-barH;
+                  const isOver=i===0&&(avg-v)>=3;
+                  return(
+                    <g key={i}>
+                      <rect x={x} y={y} width={barW} height={barH} fill={isOver?"#f59e0b":PC.primary} rx={2} opacity={0.82}/>
+                      <text x={x+barW/2} y={Math.max(y-2,7)} textAnchor="middle" fontSize={7} fill={PC.textSub}>{secToDisplay(v)}</text>
+                      <text x={x+barW/2} y={H+14} textAnchor="middle" fontSize={8} fill={PC.textSub}>{i+1}R</text>
+                    </g>
+                  );
+                })}
+                {maxVal>0&&<line x1={pad} x2={W-pad} y1={H-(avg/maxVal)*(H-10)} y2={H-(avg/maxVal)*(H-10)} stroke={PC.textLight} strokeDasharray="3,2" strokeWidth={1}/>}
+                {maxVal>0&&<text x={W-pad+2} y={H-(avg/maxVal)*(H-10)+3} fontSize={7} fill={PC.textLight}>평균</text>}
+              </svg>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {obs.map((lap:number,i:number)=>{
+                  const prev_lap=i>0?obs[i-1]:0;
+                  const interval=lap-prev_lap;
+                  return(<span key={i} style={{fontSize:11,background:PC.borderLight,borderRadius:6,padding:"2px 7px",color:PC.textSub}}>{i+1}R {secToDisplay(interval)} <span style={{color:PC.textLight}}>({secToDisplay(lap)})</span></span>);
+                })}
+                <span style={{fontSize:11,background:overpace?"#fff3cd":PC.primaryLight,borderRadius:6,padding:"2px 7px",color:overpace?"#856404":PC.primaryDark,fontWeight:600}}>평균 {secToDisplay(avg)}/랩{overpace?" ⚠️ 오버페이스":""}</span>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
           {INOUT_COURSES.map(c=>{
             const t=getElapsed(c.id);
