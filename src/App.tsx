@@ -976,6 +976,30 @@ export default function App(){
                 return(
                   <div style={card}>
                     <div style={{fontWeight:700,fontSize:14,color:PC.text,marginBottom:10}}>🏃 장애물달리기 랩 기록</div>
+                    {(()=>{
+                      const intervals=obs.map((v:number,i:number)=>i===0?v:v-obs[i-1]);
+                      const maxVal=Math.max(...intervals);
+                      const W=280,H=80,pad=18,gap=(W-pad*2)/6,barW=gap*0.55;
+                      return(
+                        <svg width="100%" viewBox={`0 0 ${W} ${H+28}`} style={{display:"block",marginBottom:12}}>
+                          {intervals.map((v:number,i:number)=>{
+                            const barH=maxVal>0?(v/maxVal)*(H-12):0;
+                            const x=pad+gap*i+gap*0.225;
+                            const y=H-barH;
+                            const isOver=i===0&&(avgSec-v)>=3;
+                            return(
+                              <g key={i}>
+                                <rect x={x} y={y} width={barW} height={barH} fill={isOver?"#f59e0b":PC.primary} rx={3} opacity={0.82}/>
+                                <text x={x+barW/2} y={Math.max(y-3,8)} textAnchor="middle" fontSize={8} fill={PC.textSub}>{secToDisplay(v)}</text>
+                                <text x={x+barW/2} y={H+16} textAnchor="middle" fontSize={9} fill={PC.textSub}>{i+1}R</text>
+                              </g>
+                            );
+                          })}
+                          {maxVal>0&&<line x1={pad} x2={W-pad} y1={H-(avgSec/maxVal)*(H-12)} y2={H-(avgSec/maxVal)*(H-12)} stroke={PC.textLight} strokeDasharray="3,2" strokeWidth={1}/>}
+                          {maxVal>0&&<text x={W-pad+2} y={H-(avgSec/maxVal)*(H-12)+3} fontSize={7} fill={PC.textLight}>평균</text>}
+                        </svg>
+                      );
+                    })()}
                     {obs.map((cum:number,i:number)=>{
                       const p=i>0?obs[i-1]:0; const interval=cum-p;
                       return(<div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><span style={{fontSize:13,fontWeight:600,color:PC.primary}}>{i+1}R</span><div style={{display:"flex",gap:8}}><span style={{fontSize:13}}>구간 {secToDisplay(interval)}</span><span style={{fontSize:12,color:PC.textSub}}>누적 {secToDisplay(cum)}</span></div></div>);
