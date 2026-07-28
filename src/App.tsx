@@ -357,26 +357,26 @@ function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated
           const maxVal=Math.max(...intervals);
           const avg=Math.round(obs[obs.length-1]/obs.length);
           const overpace=obs[0]>0&&(avg-obs[0])>=3;
-          const W=280,H=70,pad=18,gap=(W-pad*2)/6,barW=gap*0.55;
+          const W=280,H=52,pad=18,gap=(W-pad*2)/5;
+          const pts=intervals.map((v:number,i:number)=>({x:pad+gap*i,y:maxVal>0?H-(v/maxVal)*(H-10):H}));
+          const polyline=pts.map(p=>`${p.x},${p.y}`).join(" ");
           return(
             <div style={{marginBottom:8}}>
               <div style={{fontSize:12,fontWeight:600,color:PC.textSub,marginBottom:4}}>🏃 장애물달리기</div>
-              <svg width="100%" viewBox={`0 0 ${W} ${H+26}`} style={{display:"block",marginBottom:6}}>
-                {intervals.map((v:number,i:number)=>{
-                  const barH=maxVal>0?(v/maxVal)*(H-10):0;
-                  const x=pad+gap*i+gap*0.225;
-                  const y=H-barH;
-                  const isOver=i===0&&(avg-v)>=3;
+              <svg width="100%" viewBox={`0 0 ${W} ${H+22}`} style={{display:"block",marginBottom:6}}>
+                {maxVal>0&&<line x1={pad} x2={W-pad} y1={H-(avg/maxVal)*(H-10)} y2={H-(avg/maxVal)*(H-10)} stroke={PC.textLight} strokeDasharray="3,2" strokeWidth={1}/>}
+                {maxVal>0&&<text x={W-pad+2} y={H-(avg/maxVal)*(H-10)+3} fontSize={7} fill={PC.textLight}>평균</text>}
+                <polyline points={polyline} fill="none" stroke={PC.primary} strokeWidth={1.5} strokeLinejoin="round"/>
+                {pts.map((p,i)=>{
+                  const isOver=i===0&&(avg-intervals[i])>=3;
                   return(
                     <g key={i}>
-                      <rect x={x} y={y} width={barW} height={barH} fill={isOver?"#f59e0b":PC.primary} rx={2} opacity={0.82}/>
-                      <text x={x+barW/2} y={Math.max(y-2,7)} textAnchor="middle" fontSize={7} fill={PC.textSub}>{secToDisplay(v)}</text>
-                      <text x={x+barW/2} y={H+14} textAnchor="middle" fontSize={8} fill={PC.textSub}>{i+1}R</text>
+                      <circle cx={p.x} cy={p.y} r={3.5} fill={isOver?"#f59e0b":PC.primary}/>
+                      <text x={p.x} y={Math.max(p.y-6,8)} textAnchor="middle" fontSize={7} fill={PC.textSub}>{secToDisplay(intervals[i])}</text>
+                      <text x={p.x} y={H+14} textAnchor="middle" fontSize={8} fill={PC.textSub}>{i+1}R</text>
                     </g>
                   );
                 })}
-                {maxVal>0&&<line x1={pad} x2={W-pad} y1={H-(avg/maxVal)*(H-10)} y2={H-(avg/maxVal)*(H-10)} stroke={PC.textLight} strokeDasharray="3,2" strokeWidth={1}/>}
-                {maxVal>0&&<text x={W-pad+2} y={H-(avg/maxVal)*(H-10)+3} fontSize={7} fill={PC.textLight}>평균</text>}
               </svg>
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 {obs.map((lap:number,i:number)=>{
@@ -1003,24 +1003,24 @@ export default function App(){
                     {(()=>{
                       const intervals=obs.map((v:number,i:number)=>i===0?v:v-obs[i-1]);
                       const maxVal=Math.max(...intervals);
-                      const W=280,H=80,pad=18,gap=(W-pad*2)/6,barW=gap*0.55;
+                      const W=280,H=60,pad=18,gap=(W-pad*2)/5;
+                      const pts=intervals.map((v:number,i:number)=>({x:pad+gap*i,y:maxVal>0?H-(v/maxVal)*(H-10):H}));
+                      const polyline=pts.map((p:{x:number,y:number})=>`${p.x},${p.y}`).join(" ");
                       return(
-                        <svg width="100%" viewBox={`0 0 ${W} ${H+28}`} style={{display:"block",marginBottom:12}}>
-                          {intervals.map((v:number,i:number)=>{
-                            const barH=maxVal>0?(v/maxVal)*(H-12):0;
-                            const x=pad+gap*i+gap*0.225;
-                            const y=H-barH;
-                            const isOver=i===0&&(avgSec-v)>=3;
+                        <svg width="100%" viewBox={`0 0 ${W} ${H+24}`} style={{display:"block",marginBottom:12}}>
+                          {maxVal>0&&<line x1={pad} x2={W-pad} y1={H-(avgSec/maxVal)*(H-10)} y2={H-(avgSec/maxVal)*(H-10)} stroke={PC.textLight} strokeDasharray="3,2" strokeWidth={1}/>}
+                          {maxVal>0&&<text x={W-pad+2} y={H-(avgSec/maxVal)*(H-10)+3} fontSize={7} fill={PC.textLight}>평균</text>}
+                          <polyline points={polyline} fill="none" stroke={PC.primary} strokeWidth={2} strokeLinejoin="round"/>
+                          {pts.map((p:{x:number,y:number},i:number)=>{
+                            const isOver=i===0&&(avgSec-intervals[i])>=3;
                             return(
                               <g key={i}>
-                                <rect x={x} y={y} width={barW} height={barH} fill={isOver?"#f59e0b":PC.primary} rx={3} opacity={0.82}/>
-                                <text x={x+barW/2} y={Math.max(y-3,8)} textAnchor="middle" fontSize={8} fill={PC.textSub}>{secToDisplay(v)}</text>
-                                <text x={x+barW/2} y={H+16} textAnchor="middle" fontSize={9} fill={PC.textSub}>{i+1}R</text>
+                                <circle cx={p.x} cy={p.y} r={4} fill={isOver?"#f59e0b":PC.primary}/>
+                                <text x={p.x} y={Math.max(p.y-7,9)} textAnchor="middle" fontSize={8} fill={PC.textSub}>{secToDisplay(intervals[i])}</text>
+                                <text x={p.x} y={H+16} textAnchor="middle" fontSize={9} fill={PC.textSub}>{i+1}R</text>
                               </g>
                             );
                           })}
-                          {maxVal>0&&<line x1={pad} x2={W-pad} y1={H-(avgSec/maxVal)*(H-12)} y2={H-(avgSec/maxVal)*(H-12)} stroke={PC.textLight} strokeDasharray="3,2" strokeWidth={1}/>}
-                          {maxVal>0&&<text x={W-pad+2} y={H-(avgSec/maxVal)*(H-12)+3} fontSize={7} fill={PC.textLight}>평균</text>}
                         </svg>
                       );
                     })()}
