@@ -486,6 +486,7 @@ export default function App(){
   const [adminStu,setAdminStu]=useState("");
   const [adminSearch,setAdminSearch]=useState("");
   const [adminTab,setAdminTab]=useState<"records"|"classes">("records");
+  const [classSearch,setClassSearch]=useState("");
   const [classes,setClasses]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("bias_classes")||"[]");}catch{return [];}});
   const [dragStudentId,setDragStudentId]=useState<string|null>(null);
   const [dragOverClass,setDragOverClass]=useState<string|null>(null);
@@ -684,13 +685,21 @@ export default function App(){
           const allBoxes=[...classes,"__미배정__"];
           return(
             <div>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14,flexWrap:"wrap"}}>
                 <button onClick={()=>{
                   const name=prompt("새 반 이름을 입력하세요:");
                   if(!name||!name.trim())return;
                   if(classes.includes(name.trim())){alert("이미 있는 반 이름입니다.");return;}
                   saveClasses([...classes,name.trim()]);
                 }} style={{padding:"7px 16px",borderRadius:20,border:`1.5px solid ${PC.primary}`,background:PC.white,color:PC.primary,fontSize:13,fontWeight:700,cursor:"pointer"}}>+ 반 추가</button>
+                <input
+                  type="text"
+                  placeholder="🔍 학생 이름 검색..."
+                  value={classSearch}
+                  onChange={e=>setClassSearch(e.target.value)}
+                  style={{padding:"7px 12px",borderRadius:20,border:`1.5px solid ${PC.border}`,fontSize:13,outline:"none",flex:1,minWidth:160,color:PC.text,background:PC.white}}
+                />
+                {classSearch&&<button onClick={()=>setClassSearch("")} style={{padding:"4px 8px",borderRadius:12,border:"none",background:PC.borderLight,color:PC.textSub,fontSize:12,cursor:"pointer"}}>✕</button>}
                 <span style={{fontSize:12,color:PC.textSub}}>학생 칩을 드래그해서 반으로 옮기세요</span>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12}}>
@@ -730,15 +739,19 @@ export default function App(){
                         )}
                       </div>
                       <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-                        {students.map((s:any)=>(
-                          <div key={s.id} draggable
-                            onDragStart={e=>{e.dataTransfer.effectAllowed="move";setDragStudentId(s.id);}}
-                            onDragEnd={()=>{setDragStudentId(null);setDragOverClass(null);}}
-                            onClick={()=>setClassViewStu(prev=>prev===s.name?null:s.name)}
-                            style={{fontSize:12,padding:"4px 10px",borderRadius:20,background:classViewStu===s.name?PC.primary:PC.borderLight,color:classViewStu===s.name?PC.white:PC.text,cursor:"pointer",userSelect:"none",border:`1px solid ${classViewStu===s.name?PC.primary:PC.border}`,opacity:dragStudentId===s.id?0.4:1}}>
-                            {s.name}
-                          </div>
-                        ))}
+                        {students.map((s:any)=>{
+                          const matched=classSearch.trim()&&s.name.includes(classSearch.trim());
+                          const dimmed=classSearch.trim()&&!matched;
+                          return(
+                            <div key={s.id} draggable
+                              onDragStart={e=>{e.dataTransfer.effectAllowed="move";setDragStudentId(s.id);}}
+                              onDragEnd={()=>{setDragStudentId(null);setDragOverClass(null);}}
+                              onClick={()=>setClassViewStu(prev=>prev===s.name?null:s.name)}
+                              style={{fontSize:12,padding:"4px 10px",borderRadius:20,background:matched?"#fef08a":classViewStu===s.name?PC.primary:PC.borderLight,color:matched?"#713f12":classViewStu===s.name?PC.white:PC.text,cursor:"pointer",userSelect:"none",border:`1px solid ${matched?"#eab308":classViewStu===s.name?PC.primary:PC.border}`,opacity:dimmed?0.25:dragStudentId===s.id?0.4:1,fontWeight:matched?700:400,transition:"opacity 0.15s"}}>
+                              {s.name}
+                            </div>
+                          );
+                        })}
                         {students.length===0&&<span style={{fontSize:12,color:PC.textLight,padding:"4px 0"}}>여기에 드롭하세요</span>}
                       </div>
                     </div>
