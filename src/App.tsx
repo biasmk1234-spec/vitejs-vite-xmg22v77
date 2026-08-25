@@ -20,7 +20,7 @@ const INOUT_COURSES = [
   { id:"hurdle",     name:"장대허들",     icon:"🚧", defaultTime:25 },
   { id:"resistance", name:"밀고당기기",   icon:"💪", defaultTime:30 },
   { id:"rescue",     name:"구조하기",     icon:"🤝", defaultTime:30 },
-  { id:"trigger",    name:"방아쇠당기기", icon:"🎯", defaultTime:25 },
+  { id:"trigger",    name:"방아쇠당기기", icon:"🎯", defaultTime:20 },
 ];
 
 function pad(n:number){ return String(n).padStart(2,"0"); }
