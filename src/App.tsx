@@ -476,6 +476,7 @@ export default function App(){
   const [loginName,setLoginName]=useState("");
   const [loginPw,setLoginPw]=useState("");
   const [loginErr,setLoginErr]=useState("");
+  const [suggestName,setSuggestName]=useState("");
   const [loading,setLoading]=useState(false);
   const [tab,setTab]=useState("record");
   const [submitted,setSubmitted]=useState<any>(null);
@@ -548,7 +549,7 @@ export default function App(){
 
   async function handleLogin(){
     if(!loginName.trim()||!loginPw.trim()){setLoginErr("이름과 비밀번호를 입력하세요");return;}
-    setLoading(true);setLoginErr("");
+    setLoading(true);setLoginErr("");setSuggestName("");
     if(loginPw===MASTER_PW){
       setUser({name:"원장님",isAdmin:true});
       const [rows,stus]=await Promise.all([
@@ -562,7 +563,11 @@ export default function App(){
     try{
       const existing=await dbGet("students",`name=eq.${encodeURIComponent(loginName.trim())}&source=eq.bias`);
       if(existing.length>0){
-        if(existing[0].password!==loginPw){setLoginErr("비밀번호가 틀렸어요");setLoading(false);return;}
+        if(existing[0].password!==loginPw){
+          const base=loginName.trim();
+          for(let i=2;i<=99;i++){const c=base+i;const chk=await dbGet("students",`name=eq.${encodeURIComponent(c)}&source=eq.bias`);if(chk.length===0){setSuggestName(c);break;}}
+          setLoginErr("비밀번호가 틀렸어요");setLoading(false);return;
+        }
         if(existing[0].status==="pending"){setLoginErr("승인 대기 중입니다. 원장님께 문의하세요.");setLoading(false);return;}
       } else {
         await dbPost("students",{name:loginName.trim(),password:loginPw,status:"pending"});
@@ -576,6 +581,16 @@ export default function App(){
     } catch(e:any){
       setLoginErr("오류: "+e.message);
     }
+    setLoading(false);
+  }
+
+  async function handleSignupSuggest(){
+    setLoading(true);setLoginErr("");
+    try{
+      await dbPost("students",{name:suggestName,password:loginPw,status:"pending"});
+      setSuggestName("");
+      setLoginErr(`✅ '${suggestName}'으로 가입 신청 완료. 원장님 승인 후 이용 가능합니다.`);
+    }catch(e:any){setLoginErr("오류: "+e.message);}
     setLoading(false);
   }
 
@@ -648,10 +663,14 @@ export default function App(){
             처음 오신 분은 가입 신청 후 <b>원장님 승인</b> 이후 이용 가능해요
           </div>
           <label style={{fontSize:13,color:PC.textSub,marginBottom:4,display:"block",fontWeight:500}}>이름</label>
-          <input style={{...inSt,marginBottom:12}} placeholder="이름 입력" value={loginName} onChange={e=>setLoginName(e.target.value)}/>
+          <input style={{...inSt,marginBottom:12}} placeholder="이름 입력" value={loginName} onChange={e=>{setLoginName(e.target.value);setSuggestName("");}}/>
           <label style={{fontSize:13,color:PC.textSub,marginBottom:4,display:"block",fontWeight:500}}>비밀번호</label>
           <input type="password" style={inSt} placeholder="비밀번호 입력" value={loginPw} onChange={e=>setLoginPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
           {loginErr&&<p style={{fontSize:13,color:loginErr.startsWith("✅")?PC.success:PC.danger,marginTop:8,marginBottom:0}}>{loginErr}</p>}
+          {suggestName&&<div style={{marginTop:10,padding:"10px 12px",background:"rgba(255,255,255,0.06)",borderRadius:8,border:"1px solid rgba(255,255,255,0.14)"}}>
+            <p style={{fontSize:12,color:"rgba(255,255,255,0.55)",margin:"0 0 8px"}}>혹시 처음 오신 동명이인이신가요?</p>
+            <button onClick={handleSignupSuggest} disabled={loading} style={{fontSize:13,background:"#3b82f6",color:"#fff",border:"none",borderRadius:6,padding:"7px 14px",cursor:"pointer",fontWeight:600}}>'{suggestName}'으로 새로 가입하기</button>
+          </div>}
         </div>
         <button onClick={handleLogin} disabled={loading} style={{...btnPrimary,marginTop:8}}>{loading?"확인 중...":"로그인 / 가입"}</button>
         <p style={{fontSize:12,color:PC.textLight,textAlign:"center",marginTop:16}}>원장님은 마스터 비밀번호로 로그인하세요</p>
