@@ -599,6 +599,7 @@ export default function App(){
       passed:finalTime<=PASS_TIME_SEC,
       ratings,
       memo,
+      source:"bias",
     };
     try{
       const result=await dbPost("records",body);
