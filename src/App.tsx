@@ -560,7 +560,7 @@ export default function App(){
       setScreen("admin");setLoading(false);return;
     }
     try{
-      const existing=await dbGet("students",`name=eq.${encodeURIComponent(loginName.trim())}`);
+      const existing=await dbGet("students",`name=eq.${encodeURIComponent(loginName.trim())}&source=eq.bias`);
       if(existing.length>0){
         if(existing[0].password!==loginPw){setLoginErr("비밀번호가 틀렸어요");setLoading(false);return;}
         if(existing[0].status==="pending"){setLoginErr("승인 대기 중입니다. 원장님께 문의하세요.");setLoading(false);return;}
