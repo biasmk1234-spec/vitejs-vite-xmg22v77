@@ -485,7 +485,12 @@ export default function App(){
   const [allStudents,setAllStudents]=useState<any[]>([]);
   const [adminStu,setAdminStu]=useState("");
   const [adminSearch,setAdminSearch]=useState("");
-  const [adminTab,setAdminTab]=useState<"records"|"classes">("records");
+  const [adminTab,setAdminTab]=useState<"records"|"classes"|"external">("records");
+  const [extStudents,setExtStudents]=useState<any[]>([]);
+  const [extHist,setExtHist]=useState<any[]>([]);
+  const [extStu,setExtStu]=useState("");
+  const [extSearch,setExtSearch]=useState("");
+  const [extLoaded,setExtLoaded]=useState(false);
   const [classSearch,setClassSearch]=useState("");
   const [classes,setClasses]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("bias_classes")||"[]");}catch{return [];}});
   const [dragStudentId,setDragStudentId]=useState<string|null>(null);
@@ -666,19 +671,77 @@ export default function App(){
       </div>
       {/* 관리자 탭 */}
       <div style={{display:"flex",gap:0,padding:"0 1.25rem",borderBottom:`1px solid ${PC.border}`,background:PC.white}}>
-        {(["records","classes"] as const).map(t=>(
-          <button key={t} onClick={()=>setAdminTab(t)}
+        {(["records","classes","external"] as const).map(t=>(
+          <button key={t} onClick={async()=>{
+            setAdminTab(t);
+            if(t==="external"&&!extLoaded){
+              const [stus,recs]=await Promise.all([
+                dbGet("students","source=eq.external&order=created_at.desc"),
+                dbGet("records","order=created_at.desc"),
+              ]);
+              setExtStudents(Array.isArray(stus)?stus:[]);
+              setExtHist(Array.isArray(recs)?recs:[]);
+              setExtLoaded(true);
+            }
+          }}
             style={{padding:"10px 18px",border:"none",background:"none",fontSize:13,fontWeight:adminTab===t?700:400,color:adminTab===t?PC.primary:PC.textSub,borderBottom:adminTab===t?`2px solid ${PC.primary}`:"2px solid transparent",cursor:"pointer",marginBottom:-1}}>
-            {t==="records"?"📋 전체 기록":"🏫 반 관리"}
+            {t==="records"?"📋 전체 기록":t==="classes"?"🏫 반 관리":"🌐 외부 회원"}
           </button>
         ))}
       </div>
       <div style={{padding:"1.25rem"}}>
         {/* 통계 */}
-        <div style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-          <span style={{fontSize:13,color:PC.textSub}}>승인 <b style={{color:PC.text}}>{approvedStudents.length}명</b> · 기록 <b style={{color:PC.text}}>{allHist.length}개</b></span>
-          {pendingStudents.length>0&&<span style={{background:PC.danger,color:PC.white,borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:700}}>대기 {pendingStudents.length}명</span>}
-        </div>
+        {adminTab!=="external"&&(
+          <div style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <span style={{fontSize:13,color:PC.textSub}}>승인 <b style={{color:PC.text}}>{approvedStudents.length}명</b> · 기록 <b style={{color:PC.text}}>{allHist.length}개</b></span>
+            {pendingStudents.length>0&&<span style={{background:PC.danger,color:PC.white,borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:700}}>대기 {pendingStudents.length}명</span>}
+          </div>
+        )}
+
+        {/* 외부 회원 탭 */}
+        {adminTab==="external"&&(()=>{
+          const approved=extStudents.filter(s=>s.status==="approved"||!s.status);
+          const filtered=approved.filter(s=>s.name.includes(extSearch));
+          const activeName=filtered.find(s=>s.name===extStu)?extStu:(filtered[0]?.name||"");
+          return(
+            <div>
+              <div style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <span style={{fontSize:13,color:PC.textSub}}>외부 회원 <b style={{color:PC.text}}>{approved.length}명</b></span>
+                <button onClick={async()=>{
+                  const [stus,recs]=await Promise.all([
+                    dbGet("students","source=eq.external&order=created_at.desc"),
+                    dbGet("records","order=created_at.desc"),
+                  ]);
+                  setExtStudents(Array.isArray(stus)?stus:[]);
+                  setExtHist(Array.isArray(recs)?recs:[]);
+                }} style={{fontSize:12,padding:"4px 10px",borderRadius:8,border:`1px solid ${PC.border}`,background:PC.white,cursor:"pointer",color:PC.textSub}}>새로고침</button>
+              </div>
+              {!extLoaded
+                ?<div style={{textAlign:"center",color:PC.textSub,padding:"2rem 0"}}>불러오는 중...</div>
+                :approved.length===0
+                  ?<div style={{textAlign:"center",color:PC.textSub,padding:"2rem 0",fontSize:14}}>외부 가입 회원이 없습니다.</div>
+                  :<>
+                    <div style={{position:"relative",marginBottom:8}}>
+                      <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:15,pointerEvents:"none"}}>🔍</span>
+                      <input placeholder="이름으로 검색..." value={extSearch}
+                        onChange={e=>{setExtSearch(e.target.value);setExtStu("");}}
+                        style={{...inSt,paddingLeft:36}}/>
+                      {extSearch&&<button onClick={()=>{setExtSearch("");setExtStu("");}} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",fontSize:16,cursor:"pointer",color:PC.textSub}}>✕</button>}
+                    </div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+                      {filtered.map((s:any)=>(
+                        <button key={s.id} onClick={()=>setExtStu(s.name)}
+                          style={{padding:"6px 12px",borderRadius:20,border:`1.5px solid ${activeName===s.name?PC.primary:PC.border}`,background:activeName===s.name?PC.primary:PC.white,color:activeName===s.name?PC.white:PC.text,fontSize:13,fontWeight:activeName===s.name?700:400,cursor:"pointer"}}>
+                          {s.name}
+                        </button>
+                      ))}
+                    </div>
+                    {activeName&&<HistoryList records={extHist.filter(h=>h.student_name===activeName)} onUpdate={u=>setExtHist(prev=>prev.map(r=>r.id===u.id?u:r))} isAdmin={false}/>}
+                  </>
+              }
+            </div>
+          );
+        })()}
 
         {/* 반 관리 탭 */}
         {adminTab==="classes"&&(()=>{
