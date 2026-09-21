@@ -344,7 +344,10 @@ function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated
       {editing&&<EditModal h={data} onClose={()=>setEditing(false)} onSave={handleSaved}/>}
       <div style={card}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-          <span style={{fontSize:13,color:PC.textSub,fontWeight:500}}>📅 {data.date||data.record_date}</span>
+          <div>
+            <span style={{fontSize:13,color:PC.textSub,fontWeight:500}}>📅 {data.date||data.record_date}</span>
+            {data.location&&<div style={{fontSize:12,color:PC.textSub,marginTop:2}}>📍 {data.location}</div>}
+          </div>
           <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>
             <span style={{fontWeight:700,color:PC.text}}>{secToMMSS(data.total_time||data.total_sec||0)}</span>
             <span style={passTag((data.total_time||data.total_sec||0)<=PASS_TIME_SEC)}>{(data.total_time||data.total_sec||0)<=PASS_TIME_SEC?"PASS":"FAIL"}</span>
