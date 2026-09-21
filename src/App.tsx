@@ -3,7 +3,7 @@ import { useState } from "react";
 const SUPABASE_URL = "https://xivairsxhdzignniithm.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhpdmFpcnN4aGR6aWdubmlpdGhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0ODE0MzYsImV4cCI6MjA5NjA1NzQzNn0.C6oVIr2LVd_M3-O4tXeTis50ZA_sQ1UR5VpLQ90nrUk";
 const MASTER_PW = "admin1234";
-const APP_TITLE = "김민기 원장의 기록관리 시스템";
+const APP_TITLE = "BIAS 기록관리 시스템";
 const APP_SUBTITLE = "경찰 순환식 체력시험";
 const PASS_TIME_SEC = 280;
 
@@ -548,7 +548,7 @@ export default function App(){
       setUser({name:"원장님",isAdmin:true});
       const [rows,stus]=await Promise.all([
         dbGet("records","order=created_at.desc"),
-        dbGet("students","order=created_at.desc"),
+        dbGet("students","source=eq.bias&order=created_at.desc"),
       ]);
       setAllHist(Array.isArray(rows)?rows:[]);
       setAllStudents(Array.isArray(stus)?stus:[]);
@@ -630,12 +630,12 @@ export default function App(){
   const activeStu=adminStu||stuNames[0]||"";
 
   if(screen==="login") return(
-    <div style={{fontFamily:"'Apple SD Gothic Neo',sans-serif",minHeight:"100vh",background:PC.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:"2rem 1rem"}}>
+    <div style={{fontFamily:"'Apple SD Gothic Neo',sans-serif",minHeight:"100vh",background:"#0f2044",display:"flex",alignItems:"center",justifyContent:"center",padding:"2rem 1rem"}}>
       <div style={{width:"100%",maxWidth:420}}>
         <div style={{textAlign:"center",marginBottom:32}}>
           <div style={{display:"flex",justifyContent:"center",marginBottom:16}}><LogoBox size={72} fs={32}/></div>
-          <h1 style={{fontSize:22,fontWeight:800,color:PC.text,margin:"0 0 6px"}}>{APP_TITLE}</h1>
-          <p style={{fontSize:14,color:PC.textSub,margin:0}}>{APP_SUBTITLE}</p>
+          <h1 style={{fontSize:22,fontWeight:800,color:"#ffffff",margin:"0 0 6px"}}>{APP_TITLE}</h1>
+          <p style={{fontSize:14,color:"rgba(255,255,255,0.7)",margin:0}}>{APP_SUBTITLE}</p>
         </div>
         <div style={{...card,padding:"1.5rem"}}>
           <div style={{fontSize:13,color:PC.textSub,textAlign:"center",marginBottom:16,background:PC.borderLight,borderRadius:8,padding:"8px"}}>
