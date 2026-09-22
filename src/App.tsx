@@ -753,10 +753,18 @@ export default function App(){
                     </div>
                     <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
                       {filtered.map((s:any)=>(
-                        <button key={s.id} onClick={()=>setExtStu(s.name)}
-                          style={{padding:"6px 12px",borderRadius:20,border:`1.5px solid ${activeName===s.name?PC.primary:PC.border}`,background:activeName===s.name?PC.primary:PC.white,color:activeName===s.name?PC.white:PC.text,fontSize:13,fontWeight:activeName===s.name?700:400,cursor:"pointer"}}>
-                          {s.name}
-                        </button>
+                        <div key={s.id} style={{display:"flex",alignItems:"center",gap:2}}>
+                          <button onClick={()=>setExtStu(s.name)}
+                            style={{padding:"6px 12px",borderRadius:20,border:`1.5px solid ${activeName===s.name?PC.primary:PC.border}`,background:activeName===s.name?PC.primary:PC.white,color:activeName===s.name?PC.white:PC.text,fontSize:13,fontWeight:activeName===s.name?700:400,cursor:"pointer"}}>
+                            {s.name}
+                          </button>
+                          <button onClick={async()=>{
+                            if(!confirm(`${s.name}님을 탈퇴시킬까요?\n기록은 유지됩니다.`))return;
+                            await dbDelete("students",s.id);
+                            setExtStudents(prev=>prev.filter(x=>x.id!==s.id));
+                            if(extStu===s.name)setExtStu("");
+                          }} style={{padding:"3px 6px",borderRadius:8,border:"none",background:"none",color:PC.textLight,fontSize:13,cursor:"pointer"}} title="탈퇴">🗑️</button>
+                        </div>
                       ))}
                     </div>
                     {activeName&&<HistoryList records={extHist.filter(h=>h.student_name===activeName)} onUpdate={u=>setExtHist(prev=>prev.map(r=>r.id===u.id?u:r))} isAdmin={false}/>}
