@@ -767,7 +767,7 @@ export default function App(){
                         </div>
                       ))}
                     </div>
-                    {activeName&&<HistoryList records={extHist.filter(h=>h.student_name===activeName)} onUpdate={u=>setExtHist(prev=>prev.map(r=>r.id===u.id?u:r))} isAdmin={false}/>}
+                    {activeName&&<HistoryList records={extHist.filter(h=>h.student_name===activeName)} onUpdate={u=>setExtHist(prev=>prev.map(r=>r.id===u.id?u:r))} isAdmin={true}/>}
                   </>
               }
             </div>
