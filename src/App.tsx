@@ -495,6 +495,7 @@ export default function App(){
   const [extStu,setExtStu]=useState("");
   const [extSearch,setExtSearch]=useState("");
   const [extLoaded,setExtLoaded]=useState(false);
+  const [extLocFilter,setExtLocFilter]=useState("");
   const [classSearch,setClassSearch]=useState("");
   const [classes,setClasses]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("bias_classes")||"[]");}catch{return [];}});
   const [dragStudentId,setDragStudentId]=useState<string|null>(null);
@@ -700,7 +701,7 @@ export default function App(){
             if(t==="external"&&!extLoaded){
               const [stus,recs]=await Promise.all([
                 dbGet("students","source=eq.external&order=created_at.desc"),
-                dbGet("records","order=created_at.desc"),
+                dbGet("records","source=eq.external&order=created_at.desc"),
               ]);
               setExtStudents(Array.isArray(stus)?stus:[]);
               setExtHist(Array.isArray(recs)?recs:[]);
@@ -724,16 +725,20 @@ export default function App(){
         {/* 외부 회원 탭 */}
         {adminTab==="external"&&(()=>{
           const approved=extStudents.filter(s=>s.status==="approved"||!s.status);
-          const filtered=approved.filter(s=>s.name.includes(extSearch));
+          const latestRec=(name:string)=>{const r=extHist.filter(h=>h.student_name===name);return r.length?r[0].created_at||"":"";}
+          const allLocs=[...new Set(extHist.map((h:any)=>h.location).filter(Boolean))].sort() as string[];
+          const locFiltered=extLocFilter?approved.filter(s=>extHist.some(h=>h.student_name===s.name&&h.location===extLocFilter)):approved;
+          const sortedStudents=[...locFiltered].sort((a,b)=>latestRec(b.name).localeCompare(latestRec(a.name)));
+          const filtered=sortedStudents.filter(s=>s.name.includes(extSearch));
           const activeName=filtered.find(s=>s.name===extStu)?extStu:(filtered[0]?.name||"");
           return(
             <div>
               <div style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                <span style={{fontSize:13,color:PC.textSub}}>외부 회원 <b style={{color:PC.text}}>{approved.length}명</b></span>
+                <span style={{fontSize:13,color:PC.textSub}}>외부 회원 <b style={{color:PC.text}}>{approved.length}명</b>{extLocFilter&&<span style={{color:PC.primary}}> · {extLocFilter} {filtered.length}명</span>}</span>
                 <button onClick={async()=>{
                   const [stus,recs]=await Promise.all([
                     dbGet("students","source=eq.external&order=created_at.desc"),
-                    dbGet("records","order=created_at.desc"),
+                    dbGet("records","source=eq.external&order=created_at.desc"),
                   ]);
                   setExtStudents(Array.isArray(stus)?stus:[]);
                   setExtHist(Array.isArray(recs)?recs:[]);
@@ -744,6 +749,16 @@ export default function App(){
                 :approved.length===0
                   ?<div style={{textAlign:"center",color:PC.textSub,padding:"2rem 0",fontSize:14}}>외부 가입 회원이 없습니다.</div>
                   :<>
+                    {allLocs.length>0&&(
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+                        <button onClick={()=>{setExtLocFilter("");setExtStu("");}} style={{fontSize:12,padding:"5px 12px",borderRadius:20,border:`1.5px solid ${!extLocFilter?PC.primary:PC.border}`,background:!extLocFilter?PC.primary:PC.white,color:!extLocFilter?PC.white:PC.textSub,cursor:"pointer",fontWeight:!extLocFilter?700:400}}>전체</button>
+                        {allLocs.map(loc=>(
+                          <button key={loc} onClick={()=>{setExtLocFilter(extLocFilter===loc?"":loc);setExtStu("");}} style={{fontSize:12,padding:"5px 12px",borderRadius:20,border:`1.5px solid ${extLocFilter===loc?PC.primary:PC.border}`,background:extLocFilter===loc?PC.primary:PC.white,color:extLocFilter===loc?PC.white:PC.text,cursor:"pointer",fontWeight:extLocFilter===loc?700:400}}>
+                            📍 {loc}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     <div style={{position:"relative",marginBottom:8}}>
                       <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:15,pointerEvents:"none"}}>🔍</span>
                       <input placeholder="이름으로 검색..." value={extSearch}
