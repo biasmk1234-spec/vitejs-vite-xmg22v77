@@ -36,6 +36,16 @@ const SAFE_COLS:Record<string,string>={
   academies:"id,code,name,created_at",
 };
 async function dbGet(t:string,q=""){ const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}?select=${SAFE_COLS[t]||"*"}&${q}`,{headers:{...H,Accept:"application/json"}}); return r.json(); }
+async function dbGetAll(t:string,q=""){
+  const out:any[]=[];
+  for(let off=0;;off+=1000){
+    const r=await dbGet(t,`${q}&limit=1000&offset=${off}`);
+    if(!Array.isArray(r)) return off===0?r:out;
+    out.push(...r);
+    if(r.length<1000) break;
+  }
+  return out;
+}
 async function dbRpc(fn:string,args:any){
   const r=await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`,{method:"POST",headers:H,body:JSON.stringify(args)});
   const data=await r.json();
@@ -571,7 +581,7 @@ export default function App(){
       setMasterPw(loginPw);
       setUser({name:"원장님",isAdmin:true});
       const [rows,stus]=await Promise.all([
-        dbGet("records","order=created_at.desc"),
+        dbGetAll("records","order=created_at.desc,id.asc"),
         dbGet("students","source=eq.bias&order=created_at.desc"),
       ]);
       setAllHist(Array.isArray(rows)?rows:[]);
@@ -717,7 +727,7 @@ export default function App(){
             if(t==="external"&&!extLoaded){
               const [stus,recs]=await Promise.all([
                 dbGet("students","source=eq.external&order=created_at.desc"),
-                dbGet("records","source=eq.external&order=created_at.desc"),
+                dbGetAll("records","source=eq.external&order=created_at.desc,id.asc"),
               ]);
               setExtStudents(Array.isArray(stus)?stus:[]);
               setExtHist(Array.isArray(recs)?recs:[]);
@@ -754,7 +764,7 @@ export default function App(){
                 <button onClick={async()=>{
                   const [stus,recs]=await Promise.all([
                     dbGet("students","source=eq.external&order=created_at.desc"),
-                    dbGet("records","source=eq.external&order=created_at.desc"),
+                    dbGetAll("records","source=eq.external&order=created_at.desc,id.asc"),
                   ]);
                   setExtStudents(Array.isArray(stus)?stus:[]);
                   setExtHist(Array.isArray(recs)?recs:[]);
