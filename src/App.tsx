@@ -2,7 +2,6 @@ import { useState } from "react";
 
 const SUPABASE_URL = "https://xivairsxhdzignniithm.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhpdmFpcnN4aGR6aWdubmlpdGhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0ODE0MzYsImV4cCI6MjA5NjA1NzQzNn0.C6oVIr2LVd_M3-O4tXeTis50ZA_sQ1UR5VpLQ90nrUk";
-const MASTER_PW = "admin1234";
 const APP_TITLE = "BIAS 기록관리 시스템";
 const APP_SUBTITLE = "경찰 순환식 체력시험";
 const PASS_TIME_SEC = 280;
@@ -32,7 +31,17 @@ function toSec(m:string,s:string){ return (Number(m)||0)*60+(Number(s)||0); }
 function secToMS(s:number){ return { m:String(Math.floor(s/60)), s:String(s%60) }; }
 
 const H:Record<string,string> = { "Content-Type":"application/json", apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}` };
-async function dbGet(t:string,q=""){ const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}?select=*&${q}`,{headers:{...H,Accept:"application/json"}}); return r.json(); }
+const SAFE_COLS:Record<string,string>={
+  students:"id,created_at,name,status,class_name,source,academy_code",
+  academies:"id,code,name,created_at",
+};
+async function dbGet(t:string,q=""){ const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}?select=${SAFE_COLS[t]||"*"}&${q}`,{headers:{...H,Accept:"application/json"}}); return r.json(); }
+async function dbRpc(fn:string,args:any){
+  const r=await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`,{method:"POST",headers:H,body:JSON.stringify(args)});
+  const data=await r.json();
+  if(!r.ok) throw new Error(data?.message||JSON.stringify(data));
+  return data;
+}
 async function dbPost(t:string,b:any){
   const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}`,{method:"POST",headers:{...H,Prefer:"return=representation"},body:JSON.stringify(b)});
   const data=await r.json();
@@ -502,8 +511,10 @@ export default function App(){
   const [dragOverClass,setDragOverClass]=useState<string|null>(null);
   const [classViewStu,setClassViewStu]=useState<string|null>(null);
   const saveClasses=(list:string[])=>{setClasses(list);localStorage.setItem("bias_classes",JSON.stringify(list));};
+  const [masterPw,setMasterPw]=useState("");
+  const adm=(fn:string,args:any)=>dbRpc(fn,{p_code:"",p_pw:masterPw,...args});
   const moveStudentToClass=async(studentId:string,className:string|null)=>{
-    await dbPatch("students",studentId,{class_name:className});
+    await adm("admin_set_class",{p_id:studentId,p_class:className});
     setAllStudents(prev=>prev.map(s=>s.id===studentId?{...s,class_name:className}:s));
   };
 
@@ -554,7 +565,10 @@ export default function App(){
   async function handleLogin(){
     if(!loginName.trim()||!loginPw.trim()){setLoginErr("이름과 비밀번호를 입력하세요");return;}
     setLoading(true);setLoginErr("");setSuggestName("");
-    if(loginPw===MASTER_PW){
+    let isMaster=false;
+    try{ isMaster=!!(await dbRpc("master_login",{p_pw:loginPw})); }catch{}
+    if(isMaster){
+      setMasterPw(loginPw);
       setUser({name:"원장님",isAdmin:true});
       const [rows,stus]=await Promise.all([
         dbGet("records","order=created_at.desc"),
@@ -565,16 +579,17 @@ export default function App(){
       setScreen("admin");setLoading(false);return;
     }
     try{
-      const existing=await dbGet("students",`name=eq.${encodeURIComponent(loginName.trim())}&source=eq.bias`);
-      if(existing.length>0){
-        if(existing[0].password!==loginPw){
+      const res=await dbRpc("student_login",{p_name:loginName.trim(),p_pw:loginPw,p_source:"bias"});
+      if(res.found){
+        if(!res.ok){
           const base=loginName.trim();
-          for(let i=2;i<=99;i++){const c=base+i;const chk=await dbGet("students",`name=eq.${encodeURIComponent(c)}&source=eq.bias`);if(chk.length===0){setSuggestName(c);break;}}
+          for(let i=2;i<=99;i++){const c=base+i;const taken=await dbRpc("student_name_taken",{p_name:c,p_source:"bias"});if(!taken){setSuggestName(c);break;}}
           setLoginErr("비밀번호가 틀렸어요");setLoading(false);return;
         }
-        if(existing[0].status==="pending"){setLoginErr("승인 대기 중입니다. 원장님께 문의하세요.");setLoading(false);return;}
+        if(res.status==="pending"){setLoginErr("승인 대기 중입니다. 원장님께 문의하세요.");setLoading(false);return;}
       } else {
-        await dbPost("students",{name:loginName.trim(),password:loginPw,status:"pending"});
+        const created=await dbRpc("student_signup",{p_name:loginName.trim(),p_pw:loginPw,p_source:"bias"});
+        if(!created.ok){setLoginErr("이미 사용 중인 이름이에요. 다시 로그인해주세요.");setLoading(false);return;}
         setLoginErr("✅ 가입 신청이 완료됐습니다. 원장님 승인 후 이용 가능합니다.");
         setLoading(false);return;
       }
@@ -591,7 +606,8 @@ export default function App(){
   async function handleSignupSuggest(){
     setLoading(true);setLoginErr("");
     try{
-      await dbPost("students",{name:suggestName,password:loginPw,status:"pending"});
+      const created=await dbRpc("student_signup",{p_name:suggestName,p_pw:loginPw,p_source:"bias"});
+      if(!created.ok){setLoginErr("이미 사용 중인 이름이에요. 다른 이름으로 시도해주세요.");setLoading(false);return;}
       setSuggestName("");
       setLoginErr(`✅ '${suggestName}'으로 가입 신청 완료. 원장님 승인 후 이용 가능합니다.`);
     }catch(e:any){setLoginErr("오류: "+e.message);}
@@ -690,7 +706,7 @@ export default function App(){
             <LogoBox/>
             <div><div style={{fontSize:15,fontWeight:800,color:PC.text}}>{APP_TITLE}</div><div style={{fontSize:12,color:PC.textSub}}>관리자</div></div>
           </div>
-          <button onClick={()=>{setScreen("login");setLoginName("");setLoginPw("");}} style={{fontSize:13,color:PC.textSub,background:PC.white,border:`1px solid ${PC.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer"}}>로그아웃</button>
+          <button onClick={()=>{setScreen("login");setLoginName("");setLoginPw("");setMasterPw("");}} style={{fontSize:13,color:PC.textSub,background:PC.white,border:`1px solid ${PC.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer"}}>로그아웃</button>
         </div>
       </div>
       {/* 관리자 탭 */}
@@ -775,7 +791,7 @@ export default function App(){
                           </button>
                           <button onClick={async()=>{
                             if(!confirm(`${s.name}님을 탈퇴시킬까요?\n기록은 유지됩니다.`))return;
-                            await dbDelete("students",s.id);
+                            await adm("admin_delete_student",{p_id:s.id});
                             setExtStudents(prev=>prev.filter(x=>x.id!==s.id));
                             if(extStu===s.name)setExtStu("");
                           }} style={{padding:"3px 6px",borderRadius:8,border:"none",background:"none",color:PC.textLight,fontSize:13,cursor:"pointer"}} title="탈퇴">🗑️</button>
@@ -838,7 +854,7 @@ export default function App(){
                               const updated=classes.map(c=>c===cls?newName.trim():c);
                               saveClasses(updated);
                               setAllStudents(prev=>prev.map(s=>s.class_name===cls?{...s,class_name:newName.trim()}:s));
-                              approvedStudents.filter((s:any)=>s.class_name===cls).forEach((s:any)=>dbPatch("students",s.id,{class_name:newName.trim()}));
+                              approvedStudents.filter((s:any)=>s.class_name===cls).forEach((s:any)=>adm("admin_set_class",{p_id:s.id,p_class:newName.trim()}));
                             }} style={{fontSize:11,padding:"2px 6px",borderRadius:6,border:`1px solid ${PC.border}`,background:"none",cursor:"pointer",color:PC.textSub}}>수정</button>
                             {students.length===0&&<button onClick={()=>{
                               if(!confirm(`"${cls}" 반을 삭제할까요?`))return;
@@ -880,12 +896,12 @@ export default function App(){
                 <span style={{fontSize:14,fontWeight:600,color:PC.text}}>{s.name}</span>
                 <div style={{display:"flex",gap:6}}>
                   <button onClick={async()=>{
-                    await dbPatch("students",s.id,{status:"approved"});
+                    await adm("admin_set_status",{p_id:s.id,p_status:"approved"});
                     setAllStudents(prev=>prev.map(x=>x.id===s.id?{...x,status:"approved"}:x));
                   }} style={{padding:"5px 12px",borderRadius:8,border:"none",background:PC.success,color:PC.white,fontSize:13,fontWeight:700,cursor:"pointer"}}>✓ 승인</button>
                   <button onClick={async()=>{
                     if(!confirm(`${s.name}님의 가입을 거절할까요?`))return;
-                    await dbDelete("students",s.id);
+                    await adm("admin_delete_student",{p_id:s.id});
                     setAllStudents(prev=>prev.filter(x=>x.id!==s.id));
                   }} style={{padding:"5px 12px",borderRadius:8,border:"none",background:PC.dangerLight,color:PC.danger,fontSize:13,fontWeight:700,cursor:"pointer"}}>✕ 거절</button>
                 </div>
@@ -920,12 +936,12 @@ export default function App(){
                         <button onClick={async()=>{
                           const newPw=prompt(`${s.name}님의 새 비밀번호를 입력하세요:`);
                           if(!newPw||!newPw.trim())return;
-                          await dbPatch("students",s.id,{password:newPw.trim()});
+                          await adm("admin_reset_password",{p_id:s.id,p_new:newPw.trim()});
                           alert(`${s.name}님 비밀번호가 변경됐습니다.`);
                         }} style={{padding:"3px 6px",borderRadius:8,border:"none",background:"none",color:PC.textSub,fontSize:13,cursor:"pointer"}} title="비밀번호 초기화">🔑</button>
                         <button onClick={async()=>{
                           if(!confirm(`${s.name}님을 탈퇴시킬까요?\n기록은 유지됩니다.`))return;
-                          await dbDelete("students",s.id);
+                          await adm("admin_delete_student",{p_id:s.id});
                           setAllStudents(prev=>prev.filter(x=>x.id!==s.id));
                           if(adminStu===s.name)setAdminStu("");
                         }} style={{padding:"3px 6px",borderRadius:8,border:"none",background:"none",color:PC.textLight,fontSize:13,cursor:"pointer"}} title="탈퇴">🗑️</button>
