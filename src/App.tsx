@@ -581,7 +581,7 @@ export default function App(){
       setMasterPw(loginPw);
       setUser({name:"원장님",isAdmin:true});
       const [rows,stus]=await Promise.all([
-        dbGetAll("records","order=created_at.desc,id.asc"),
+        dbGetAll("records","source=eq.bias&order=created_at.desc,id.asc"),
         dbGet("students","source=eq.bias&order=created_at.desc"),
       ]);
       setAllHist(Array.isArray(rows)?rows:[]);
@@ -604,7 +604,7 @@ export default function App(){
         setLoading(false);return;
       }
       setUser({name:loginName.trim(),password:loginPw});
-      const all=await dbGet("records",`student_name=eq.${encodeURIComponent(loginName.trim())}&order=created_at.desc`);
+      const all=await dbGet("records",`student_name=eq.${encodeURIComponent(loginName.trim())}&source=eq.bias&order=created_at.desc`);
       setMyHist(Array.isArray(all)?all:[]);
       setScreen("record");setTab("record");
     } catch(e:any){
@@ -645,6 +645,7 @@ export default function App(){
       ratings,
       memo,
       source:"bias",
+      academy_code:"bias",
     };
     try{
       const result=await dbPost("records",body);
@@ -751,12 +752,14 @@ export default function App(){
         {/* 외부 회원 탭 */}
         {adminTab==="external"&&(()=>{
           const approved=extStudents.filter(s=>s.status==="approved"||!s.status);
-          const latestRec=(name:string)=>{const r=extHist.filter(h=>h.student_name===name);return r.length?r[0].created_at||"":"";}
+          const recsOf=(s:any)=>extHist.filter(h=>h.student_name===s.name&&(h.academy_code||"bias")===(s.academy_code||"bias"));
+          const latestRec=(s:any)=>{const r=recsOf(s);return r.length?r[0].created_at||"":"";}
           const allLocs=[...new Set(extHist.map((h:any)=>h.location).filter(Boolean))].sort() as string[];
-          const locFiltered=extLocFilter?approved.filter(s=>extHist.some(h=>h.student_name===s.name&&h.location===extLocFilter)):approved;
-          const sortedStudents=[...locFiltered].sort((a,b)=>latestRec(b.name).localeCompare(latestRec(a.name)));
+          const locFiltered=extLocFilter?approved.filter(s=>recsOf(s).some(h=>h.location===extLocFilter)):approved;
+          const sortedStudents=[...locFiltered].sort((a,b)=>latestRec(b).localeCompare(latestRec(a)));
           const filtered=sortedStudents.filter(s=>s.name.includes(extSearch));
-          const activeName=filtered.find(s=>s.name===extStu)?extStu:(filtered[0]?.name||"");
+          const activeS=filtered.find(s=>s.id===extStu)||filtered[0];
+          const activeName=activeS?.name||"";
           return(
             <div>
               <div style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -795,20 +798,20 @@ export default function App(){
                     <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
                       {filtered.map((s:any)=>(
                         <div key={s.id} style={{display:"flex",alignItems:"center",gap:2}}>
-                          <button onClick={()=>setExtStu(s.name)}
-                            style={{padding:"6px 12px",borderRadius:20,border:`1.5px solid ${activeName===s.name?PC.primary:PC.border}`,background:activeName===s.name?PC.primary:PC.white,color:activeName===s.name?PC.white:PC.text,fontSize:13,fontWeight:activeName===s.name?700:400,cursor:"pointer"}}>
+                          <button onClick={()=>setExtStu(s.id)}
+                            style={{padding:"6px 12px",borderRadius:20,border:`1.5px solid ${activeS?.id===s.id?PC.primary:PC.border}`,background:activeS?.id===s.id?PC.primary:PC.white,color:activeS?.id===s.id?PC.white:PC.text,fontSize:13,fontWeight:activeS?.id===s.id?700:400,cursor:"pointer"}}>
                             {s.name}
                           </button>
                           <button onClick={async()=>{
                             if(!confirm(`${s.name}님을 탈퇴시킬까요?\n기록은 유지됩니다.`))return;
                             await adm("admin_delete_student",{p_id:s.id});
                             setExtStudents(prev=>prev.filter(x=>x.id!==s.id));
-                            if(extStu===s.name)setExtStu("");
+                            if(extStu===s.id)setExtStu("");
                           }} style={{padding:"3px 6px",borderRadius:8,border:"none",background:"none",color:PC.textLight,fontSize:13,cursor:"pointer"}} title="탈퇴">🗑️</button>
                         </div>
                       ))}
                     </div>
-                    {activeName&&<HistoryList records={extHist.filter(h=>h.student_name===activeName)} onUpdate={u=>setExtHist(prev=>prev.map(r=>r.id===u.id?u:r))} isAdmin={true}/>}
+                    {activeName&&<HistoryList records={recsOf(activeS)} onUpdate={u=>setExtHist(prev=>prev.map(r=>r.id===u.id?u:r))} isAdmin={true}/>}
                   </>
               }
             </div>
@@ -994,7 +997,7 @@ export default function App(){
         <div style={{display:"flex",gap:0,borderBottom:`1px solid ${PC.border}`}}>
           {[["record","기록입력"],["history","내 기록"]].map(([k,v])=>(
             <button key={k} style={{padding:"10px 20px",fontSize:14,fontWeight:tab===k?700:400,border:"none",background:"none",cursor:"pointer",color:tab===k?PC.primary:PC.textSub,borderBottom:tab===k?`2px solid ${PC.primary}`:"2px solid transparent",marginBottom:-1,position:"relative"}}
-              onClick={()=>{setTab(k);if(k==="history"){dbGet("records",`student_name=eq.${encodeURIComponent(user.name)}&order=created_at.desc`).then((r:any[])=>{const rows=Array.isArray(r)?r:[];setMyHist(rows);if(hasNewComment(rows,user.name)){}setTimeout(()=>setSeenAt(user.name),500);});}}}>
+              onClick={()=>{setTab(k);if(k==="history"){dbGet("records",`student_name=eq.${encodeURIComponent(user.name)}&source=eq.bias&order=created_at.desc`).then((r:any[])=>{const rows=Array.isArray(r)?r:[];setMyHist(rows);if(hasNewComment(rows,user.name)){}setTimeout(()=>setSeenAt(user.name),500);});}}}>
               {v}
               {k==="history"&&hasNewComment(myHist,user.name)&&<span style={{position:"absolute",top:8,right:6,width:8,height:8,borderRadius:"50%",background:PC.danger,display:"inline-block"}}/>}
             </button>
