@@ -508,12 +508,14 @@ export default function App(){
   const [allStudents,setAllStudents]=useState<any[]>([]);
   const [adminStu,setAdminStu]=useState("");
   const [adminSearch,setAdminSearch]=useState("");
-  const [adminTab,setAdminTab]=useState<"records"|"classes"|"external">("records");
+  const [adminTab,setAdminTab]=useState<"records"|"classes"|"external"|"academy">("records");
   const [extStudents,setExtStudents]=useState<any[]>([]);
   const [extHist,setExtHist]=useState<any[]>([]);
   const [extStu,setExtStu]=useState("");
   const [extSearch,setExtSearch]=useState("");
   const [extLoaded,setExtLoaded]=useState(false);
+  const [academies,setAcademies]=useState<any[]>([]);
+  const [selAcademy,setSelAcademy]=useState("");
   const [extLocFilter,setExtLocFilter]=useState("");
   const [classSearch,setClassSearch]=useState("");
   const [classes,setClasses]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("bias_classes")||"[]");}catch{return [];}});
@@ -722,27 +724,30 @@ export default function App(){
       </div>
       {/* 관리자 탭 */}
       <div style={{display:"flex",gap:0,padding:"0 1.25rem",borderBottom:`1px solid ${PC.border}`,background:PC.white}}>
-        {(["records","classes","external"] as const).map(t=>(
+        {(["records","classes","external","academy"] as const).map(t=>(
           <button key={t} onClick={async()=>{
             setAdminTab(t);
-            if(t==="external"&&!extLoaded){
-              const [stus,recs]=await Promise.all([
+            if(t==="external"||t==="academy"){setExtStu("");setExtSearch("");setExtLocFilter("");}
+            if((t==="external"||t==="academy")&&!extLoaded){
+              const [stus,recs,acads]=await Promise.all([
                 dbGet("students","source=eq.external&order=created_at.desc"),
                 dbGetAll("records","source=eq.external&order=created_at.desc,id.asc"),
+                dbGet("academies","order=created_at.asc"),
               ]);
               setExtStudents(Array.isArray(stus)?stus:[]);
               setExtHist(Array.isArray(recs)?recs:[]);
+              setAcademies(Array.isArray(acads)?acads:[]);
               setExtLoaded(true);
             }
           }}
             style={{padding:"10px 18px",border:"none",background:"none",fontSize:13,fontWeight:adminTab===t?700:400,color:adminTab===t?PC.primary:PC.textSub,borderBottom:adminTab===t?`2px solid ${PC.primary}`:"2px solid transparent",cursor:"pointer",marginBottom:-1}}>
-            {t==="records"?"📋 전체 기록":t==="classes"?"🏫 반 관리":"🌐 외부 회원"}
+            {t==="records"?"📋 전체 기록":t==="classes"?"🏫 반 관리":t==="external"?"🌐 공개 회원":"🏢 학원 전용"}
           </button>
         ))}
       </div>
       <div style={{padding:"1.25rem"}}>
         {/* 통계 */}
-        {adminTab!=="external"&&(
+        {adminTab!=="external"&&adminTab!=="academy"&&(
           <div style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
             <span style={{fontSize:13,color:PC.textSub}}>승인 <b style={{color:PC.text}}>{approvedStudents.length}명</b> · 기록 <b style={{color:PC.text}}>{allHist.length}개</b></span>
             {pendingStudents.length>0&&<span style={{background:PC.danger,color:PC.white,borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:700}}>대기 {pendingStudents.length}명</span>}
@@ -750,11 +755,17 @@ export default function App(){
         )}
 
         {/* 외부 회원 탭 */}
-        {adminTab==="external"&&(()=>{
-          const approved=extStudents.filter(s=>s.status==="approved"||!s.status);
+        {(adminTab==="external"||adminTab==="academy")&&(()=>{
+          const isAcademyTab=adminTab==="academy";
+          const academyList=academies.filter((a:any)=>a.code!=="bias");
+          const curAcademy=academyList.find((a:any)=>a.code===selAcademy)||academyList[0];
+          const approvedAll=extStudents.filter(s=>s.status==="approved"||!s.status);
+          const approved=isAcademyTab
+            ?approvedAll.filter(s=>curAcademy&&s.academy_code===curAcademy.code)
+            :approvedAll.filter(s=>(s.academy_code||"bias")==="bias");
           const recsOf=(s:any)=>extHist.filter(h=>h.student_name===s.name&&(h.academy_code||"bias")===(s.academy_code||"bias"));
           const latestRec=(s:any)=>{const r=recsOf(s);return r.length?r[0].created_at||"":"";}
-          const allLocs=[...new Set(extHist.map((h:any)=>h.location).filter(Boolean))].sort() as string[];
+          const allLocs=[...new Set(approved.flatMap(s=>recsOf(s)).map((h:any)=>h.location).filter(Boolean))].sort() as string[];
           const locFiltered=extLocFilter?approved.filter(s=>recsOf(s).some(h=>h.location===extLocFilter)):approved;
           const sortedStudents=[...locFiltered].sort((a,b)=>latestRec(b).localeCompare(latestRec(a)));
           const filtered=sortedStudents.filter(s=>s.name.includes(extSearch));
@@ -763,20 +774,34 @@ export default function App(){
           return(
             <div>
               <div style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                <span style={{fontSize:13,color:PC.textSub}}>외부 회원 <b style={{color:PC.text}}>{approved.length}명</b>{extLocFilter&&<span style={{color:PC.primary}}> · {extLocFilter} {filtered.length}명</span>}</span>
+                <span style={{fontSize:13,color:PC.textSub}}>{isAcademyTab?(curAcademy?.name||"학원 전용"):"공개 회원"} <b style={{color:PC.text}}>{approved.length}명</b>{extLocFilter&&<span style={{color:PC.primary}}> · {extLocFilter} {filtered.length}명</span>}</span>
                 <button onClick={async()=>{
-                  const [stus,recs]=await Promise.all([
+                  const [stus,recs,acads]=await Promise.all([
                     dbGet("students","source=eq.external&order=created_at.desc"),
                     dbGetAll("records","source=eq.external&order=created_at.desc,id.asc"),
+                    dbGet("academies","order=created_at.asc"),
                   ]);
                   setExtStudents(Array.isArray(stus)?stus:[]);
                   setExtHist(Array.isArray(recs)?recs:[]);
+                  setAcademies(Array.isArray(acads)?acads:[]);
                 }} style={{fontSize:12,padding:"4px 10px",borderRadius:8,border:`1px solid ${PC.border}`,background:PC.white,cursor:"pointer",color:PC.textSub}}>새로고침</button>
               </div>
+              {isAcademyTab&&extLoaded&&academyList.length>0&&(
+                <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+                  {academyList.map((a:any)=>(
+                    <button key={a.code} onClick={()=>{setSelAcademy(a.code);setExtStu("");setExtSearch("");setExtLocFilter("");}}
+                      style={{fontSize:13,padding:"6px 14px",borderRadius:20,border:`1.5px solid ${curAcademy?.code===a.code?PC.primary:PC.border}`,background:curAcademy?.code===a.code?PC.primary:PC.white,color:curAcademy?.code===a.code?PC.white:PC.text,fontWeight:curAcademy?.code===a.code?700:500,cursor:"pointer"}}>
+                      🏢 {a.name}
+                    </button>
+                  ))}
+                </div>
+              )}
               {!extLoaded
                 ?<div style={{textAlign:"center",color:PC.textSub,padding:"2rem 0"}}>불러오는 중...</div>
+                :isAcademyTab&&academyList.length===0
+                  ?<div style={{textAlign:"center",color:PC.textSub,padding:"2rem 0",fontSize:14}}>전용 링크 학원이 아직 없습니다.</div>
                 :approved.length===0
-                  ?<div style={{textAlign:"center",color:PC.textSub,padding:"2rem 0",fontSize:14}}>외부 가입 회원이 없습니다.</div>
+                  ?<div style={{textAlign:"center",color:PC.textSub,padding:"2rem 0",fontSize:14}}>{isAcademyTab?"이 학원에 가입한 회원이 없습니다.":"공개 가입 회원이 없습니다."}</div>
                   :<>
                     {allLocs.length>0&&(
                       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
