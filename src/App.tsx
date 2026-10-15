@@ -239,7 +239,7 @@ function MeasureModal({studentName,source,academyCode,withLocation,onClose,onSav
       total_sec:r1(finalTime),
       move_time:r1(move),
       passed:finalTime<=PASS_TIME_SEC,
-      ratings:{},
+      ratings:{_by:"coach"},
       memo:"",
       source,
       academy_code:academyCode,
@@ -285,6 +285,60 @@ function MeasureModal({studentName,source,academyCode,withLocation,onClose,onSav
         <button onClick={save} disabled={saving||lapSecs[5]<=0} style={{...btnPrimary,width:"100%",opacity:saving||lapSecs[5]<=0?0.45:1}}>
           {saving?"저장 중...":lapSecs[5]<=0?"6R까지 측정하면 저장할 수 있어요":"기록 저장"}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ── 체감 난이도 · 느낀점 입력 (코치가 입력한 기록용) ──
+function RatingModal({data,onClose,onSave}:{data:any,onClose:()=>void,onSave:(u:any)=>void}){
+  const items=[
+    {key:"condition",label:"그날 나의 컨디션은?"},
+    {key:"i_obstacle",label:"장애물달리기 체감 강도는?"},
+    {key:"i_hurdle",label:"장대허들 체감 강도는?"},
+    {key:"i_resistance",label:"밀고당기기 체감 강도는?"},
+    {key:"i_rescue",label:"구조하기 체감 강도는?"},
+    {key:"i_trigger",label:"방아쇠당기기 체감 강도는?"},
+  ];
+  const bgs=["#e6f4ea","#e6f4ea","#fef7e0","#fce8e6","#fce8e6"];
+  const fgs=["#34a853","#34a853","#f29900","#ea4335","#c5221f"];
+  const [ratings,setRatings]=useState<Record<string,any>>(data.ratings||{});
+  const [memo,setMemo]=useState(data.memo||"");
+  const [saving,setSaving]=useState(false);
+  async function save(){
+    setSaving(true);
+    try{
+      await dbPatch("records",data.id,{ratings,memo});
+      onSave({...data,ratings,memo});
+      onClose();
+    }catch(e:any){
+      alert("저장 실패: "+e.message);
+      setSaving(false);
+    }
+  }
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:1000,overflowY:"auto",display:"flex",justifyContent:"center",padding:"20px 12px"}} onClick={e=>e.stopPropagation()}>
+      <div style={{background:PC.bg,borderRadius:16,width:"100%",maxWidth:460,padding:"16px 14px",alignSelf:"flex-start"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+          <span style={{fontSize:16,fontWeight:800,color:PC.text}}>📝 체감 난이도 · 느낀점</span>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:PC.textSub}}>✕</button>
+        </div>
+        <div style={{fontSize:12,color:PC.textSub,marginBottom:12}}>{data.date||data.record_date} 측정 기록에 남겨요. 1(매우 힘듦) ~ 5(매우 좋음)</div>
+        <div style={card}>
+          {items.map(item=>(
+            <div key={item.key} style={{marginBottom:12}}>
+              <div style={{fontSize:13,color:PC.textSub,marginBottom:6,fontWeight:500}}>{item.label}</div>
+              <div style={{display:"flex",gap:6}}>
+                {[1,2,3,4,5].map(n=>{const active=ratings[item.key]===n;return(
+                  <button key={n} onClick={()=>setRatings(p=>({...p,[item.key]:active?null:n}))} style={{width:44,height:44,borderRadius:10,border:active?"none":`1px solid ${PC.border}`,background:active?bgs[n-1]:PC.white,color:active?fgs[n-1]:PC.textSub,fontSize:14,fontWeight:active?700:400,cursor:"pointer"}}>{n}</button>
+                );})}
+              </div>
+            </div>
+          ))}
+          <label style={{fontSize:13,color:PC.textSub,marginBottom:4,display:"block",fontWeight:500}}>느낀 점 · 특이사항</label>
+          <textarea rows={3} placeholder="자유롭게 입력하세요" value={memo} onChange={e=>setMemo(e.target.value)} style={{...inSt,resize:"vertical" as const,fontSize:13}}/>
+        </div>
+        <button onClick={save} disabled={saving} style={{...btnPrimary,width:"100%"}}>{saving?"저장 중...":"저장"}</button>
       </div>
     </div>
   );
@@ -525,6 +579,7 @@ function AdminCommentBox({data,onSave}:{data:any,onSave:(updated:any)=>void}){
 
 function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated:any)=>void,isAdmin?:boolean}){
   const [editing,setEditing]=useState(false);
+  const [ratingOpen,setRatingOpen]=useState(false);
   const [data,setData]=useState(h);
   const chg=prev?(data.total_time||data.total_sec||0)-(prev.total_time||prev.total_sec||0):null;
   const cb=cBdg(chg);
@@ -612,6 +667,10 @@ function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated
           </div>
         )}
         {data.memo&&<div style={{fontSize:12,color:PC.textSub,marginTop:6,paddingTop:6,borderTop:`1px solid ${PC.borderLight}`}}>📝 {data.memo}</div>}
+        {!isAdmin&&data.ratings?._by==="coach"&&!hasR&&!data.memo&&(
+          <button onClick={e=>{e.stopPropagation();setRatingOpen(true);}} style={{width:"100%",marginTop:8,padding:"9px 12px",borderRadius:8,border:`1px dashed ${PC.primary}`,background:PC.primaryLight,color:PC.primaryDark,fontSize:13,fontWeight:700,cursor:"pointer"}}>📝 체감 난이도 · 느낀점 남기기</button>
+        )}
+        {ratingOpen&&<RatingModal data={data} onClose={()=>setRatingOpen(false)} onSave={u=>{setData(u);onUpdate&&onUpdate(u);}}/>}
         {isAdmin&&<AdminCommentBox data={data} onSave={d=>{setData(d);onUpdate&&onUpdate(d);}}/>}
         {!isAdmin&&data.admin_comment&&<div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${PC.borderLight}`,fontSize:12,color:PC.primaryDark,fontWeight:600}}>💬 원장님: {data.admin_comment}</div>}
       </div>
