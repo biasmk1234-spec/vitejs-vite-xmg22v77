@@ -23,12 +23,13 @@ const INOUT_COURSES = [
 ];
 
 function pad(n:number){ return String(n).padStart(2,"0"); }
-function secToMMSS(s:number){ const n=Math.round(s); return `${pad(Math.floor(n/60))}:${pad(n%60)}`; }
-function secToDisplay(s:number){ const n=Math.round(s); if(n<=0)return"0초"; return n>=60?`${Math.floor(n/60)}분 ${pad(n%60)}초`:`${n}초`; }
+function r1(n:number){ return Math.round(n*10)/10; }
+function secToMMSS(s:number){ const t=Math.round(s*10); const n=Math.floor(t/10); const d=t%10; return `${pad(Math.floor(n/60))}:${pad(n%60)}${d?"."+d:""}`; }
+function secToDisplay(s:number){ const t=Math.round(s*10); if(t<=0)return"0초"; const n=Math.floor(t/10); const f=t%10?"."+(t%10):""; return n>=60?`${Math.floor(n/60)}분 ${pad(n%60)}${f}초`:`${n}${f}초`; }
 function todayISO(){ return new Date().toISOString().split("T")[0]; }
 function isoToKR(iso:string){ if(!iso)return""; const[y,m,d]=iso.split("-"); return `${y}.${m}.${d}`; }
-function toSec(m:string,s:string){ return (Number(m)||0)*60+(Number(s)||0); }
-function secToMS(s:number){ return { m:String(Math.floor(s/60)), s:String(s%60) }; }
+function toSec(m:string,s:string){ return r1((Number(m)||0)*60+(Number(s)||0)); }
+function secToMS(s:number){ const v=r1(s); const m=Math.floor(v/60); return { m:String(m), s:String(r1(v-m*60)) }; }
 
 const H:Record<string,string> = { "Content-Type":"application/json", apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}` };
 const SAFE_COLS:Record<string,string>={
@@ -76,8 +77,8 @@ function hasNewComment(records:any[], name:string){
   return records.some(r=>r.admin_comment&&r.comment_updated_at&&(!seen||r.comment_updated_at>seen));
 }
 
-function dBdg(diff:number|null){ if(diff===null)return null; if(diff>0)return{bg:PC.dangerLight,fg:PC.danger,txt:`+${diff}초 초과`}; if(diff<0)return{bg:PC.successLight,fg:PC.success,txt:`${Math.abs(diff)}초 단축`}; return{bg:PC.borderLight,fg:PC.textSub,txt:"기준"}; }
-function cBdg(d:number|null){ if(d===null)return null; if(d<0)return{bg:PC.successLight,fg:PC.success,txt:`▼${Math.abs(d)}초`}; if(d>0)return{bg:PC.dangerLight,fg:PC.danger,txt:`▲${d}초`}; return{bg:PC.borderLight,fg:PC.textSub,txt:"→"}; }
+function dBdg(diff0:number|null){ if(diff0===null)return null; const diff=r1(diff0); if(diff>0)return{bg:PC.dangerLight,fg:PC.danger,txt:`+${diff}초 초과`}; if(diff<0)return{bg:PC.successLight,fg:PC.success,txt:`${Math.abs(diff)}초 단축`}; return{bg:PC.borderLight,fg:PC.textSub,txt:"기준"}; }
+function cBdg(d0:number|null){ if(d0===null)return null; const d=r1(d0); if(d<0)return{bg:PC.successLight,fg:PC.success,txt:`▼${Math.abs(d)}초`}; if(d>0)return{bg:PC.dangerLight,fg:PC.danger,txt:`▲${d}초`}; return{bg:PC.borderLight,fg:PC.textSub,txt:"→"}; }
 function Bdg({bg,fg,txt}:{bg:string,fg:string,txt:string}){ return <span style={{background:bg,color:fg,borderRadius:20,padding:"3px 9px",fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}>{txt}</span>; }
 
 const card:any={background:PC.white,border:`1px solid ${PC.border}`,borderRadius:12,padding:"1rem 1.25rem",marginBottom:10,boxShadow:"0 1px 3px rgba(0,0,0,0.06)"};
@@ -100,7 +101,7 @@ function MSInput({mVal,sVal,onM,onS}:{mVal:string,sVal:string,onM:any,onS:any}){
     <div style={{display:"flex",gap:3,alignItems:"center"}}>
       <input type="number" min={0} placeholder="분" value={mVal} onChange={onM} style={st}/>
       <span style={{fontSize:12,color:PC.textSub}}>분</span>
-      <input type="number" min={0} max={59} placeholder="초" value={sVal} onChange={onS} style={st}/>
+      <input type="number" min={0} max={59.9} step={0.1} placeholder="초" value={sVal} onChange={onS} style={st}/>
       <span style={{fontSize:12,color:PC.textSub}}>초</span>
     </div>
   );
@@ -150,7 +151,7 @@ function Stopwatch({onCapture,onUndo,onReset}:{onCapture:(idx:number,sec:number)
     try{navigator.vibrate?.(30);}catch{}
     const idx=caps.length;
     setCaps(c=>[...c,ms]);
-    onCapture(idx,Math.round(ms/1000));
+    onCapture(idx,Math.round(ms/100)/10);
   }
   function undo(){
     if(!caps.length)return;
@@ -218,22 +219,22 @@ function MeasureModal({studentName,source,academyCode,withLocation,onClose,onSav
     if(lapSecs[5]<=0)return;
     const io:Record<string,{in:number,out:number}>={};
     INOUT_COURSES.forEach((c,ci)=>{io[c.id]={in:sec(6+ci*2),out:sec(7+ci*2)};});
-    const inout_times=Object.fromEntries(INOUT_COURSES.map(c=>[c.id,{in:io[c.id].in,out:io[c.id].out,elapsed:io[c.id].out>io[c.id].in?io[c.id].out-io[c.id].in:0}]));
+    const inout_times=Object.fromEntries(INOUT_COURSES.map(c=>[c.id,{in:io[c.id].in,out:io[c.id].out,elapsed:io[c.id].out>io[c.id].in?r1(io[c.id].out-io[c.id].in):0}]));
     const obsTotal=lapSecs[5];
     const pairs:[number,number][]=[[obsTotal,io.hurdle.in],[io.hurdle.out,io.resistance.in],[io.resistance.out,io.rescue.in],[io.rescue.out,io.trigger.in]];
     let move=0;
     pairs.forEach(([a,b])=>{if(a>0&&b>0)move+=Math.max(0,b-a);});
     const coursesSum=obsTotal+INOUT_COURSES.reduce((s,c)=>s+inout_times[c.id].elapsed,0);
-    const finalTime=io.trigger.out>0?io.trigger.out:coursesSum+move;
+    const finalTime=r1(io.trigger.out>0?io.trigger.out:coursesSum+move);
     const body:any={
       student_name:studentName,
       record_date:recDate,
       date:isoToKR(recDate),
       obstacle_laps:lapSecs,
       inout_times,
-      total_time:finalTime,
-      total_sec:finalTime,
-      move_time:move,
+      total_time:r1(finalTime),
+      total_sec:r1(finalTime),
+      move_time:r1(move),
       passed:finalTime<=PASS_TIME_SEC,
       ratings:{},
       memo:"",
@@ -318,7 +319,7 @@ function EditModal({h, onClose, onSave}:{h:any, onClose:()=>void, onSave:(update
   const updateLap=(i:number,field:"m"|"s",v:string)=>setLaps(prev=>prev.map((l,idx)=>idx===i?{...l,[field]:v}:l));
   const updateInout=(id:string,field:string,v:string)=>setInout(p=>({...p,[id]:{...p[id],[field]:v}}));
   const lapSecs=laps.map(l=>toSec(l.m,l.s));
-  const getInoutSec=(id:string)=>{ const {inM,inS,outM,outS}=inout[id]; const i=toSec(inM,inS),o=toSec(outM,outS); return o>i?o-i:0; };
+  const getInoutSec=(id:string)=>{ const {inM,inS,outM,outS}=inout[id]; const i=toSec(inM,inS),o=toSec(outM,outS); return o>i?r1(o-i):0; };
 
   const getMoveTimes=()=>{
     const moves:number[]=[];
@@ -353,14 +354,14 @@ function EditModal({h, onClose, onSave}:{h:any, onClose:()=>void, onSave:(update
     const inout_times=Object.fromEntries(INOUT_COURSES.map(c=>[c.id,{
       in:toSec(inout[c.id].inM,inout[c.id].inS),
       out:toSec(inout[c.id].outM,inout[c.id].outS),
-      elapsed:getInoutSec(c.id),
+      elapsed:r1(getInoutSec(c.id)),
     }]));
     const body={
       obstacle_laps:lapSecs,
       inout_times,
-      total_time:finalTime,
-      total_sec:finalTime,
-      move_time:totalMoveTime||0,
+      total_time:r1(finalTime),
+      total_sec:r1(finalTime),
+      move_time:r1(totalMoveTime||0),
       passed:finalTime<=PASS_TIME_SEC,
       ratings,
       memo,
@@ -557,7 +558,7 @@ function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated
         {obs.length>0&&obs[obs.length-1]>0&&(()=>{
           const intervals=obs.map((v:number,i:number)=>i===0?v:v-obs[i-1]);
           const maxVal=Math.max(...intervals);
-          const avg=Math.round(obs[obs.length-1]/obs.length);
+          const avg=r1(obs[obs.length-1]/obs.length);
           const overpace=obs[0]>0&&(avg-obs[0])>=3;
           const W=280,H=52,pad=18,gap=(W-pad*2)/5;
           const pts=intervals.map((v:number,i:number)=>({x:pad+gap*i,y:maxVal>0?H-(v/maxVal)*(H-10):H}));
@@ -597,7 +598,7 @@ function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated
             if(!t)return null;
             const diff=t-c.defaultTime;
             const db=dBdg(diff);
-            return(<span key={c.id} style={{fontSize:12,display:"flex",alignItems:"center",gap:4}}>{c.icon} <span style={{color:PC.textSub}}>{secToDisplay(t)}</span>{db&&diff!==0&&<span style={{color:db.fg}}>({diff>0?`+${diff}`:diff}초)</span>}</span>);
+            return(<span key={c.id} style={{fontSize:12,display:"flex",alignItems:"center",gap:4}}>{c.icon} <span style={{color:PC.textSub}}>{secToDisplay(t)}</span>{db&&diff!==0&&<span style={{color:db.fg}}>({diff>0?`+${r1(diff)}`:r1(diff)}초)</span>}</span>);
           })}
         </div>
         {(data.move_time||0)>0&&<div style={{fontSize:12,color:PC.textSub,marginTop:4}}>이동시간 {secToDisplay(data.move_time)}</div>}
@@ -719,7 +720,7 @@ export default function App(){
     Object.fromEntries(INOUT_COURSES.map(c=>[c.id,{inM:"",inS:"",outM:"",outS:""}]))
   );
   const updateInout=(id:string,field:string,v:string)=>setInout(p=>({...p,[id]:{...p[id],[field]:v}}));
-  const getInoutSec=(id:string)=>{ const {inM,inS,outM,outS}=inout[id]; const i=toSec(inM,inS),o=toSec(outM,outS); return o>i?o-i:0; };
+  const getInoutSec=(id:string)=>{ const {inM,inS,outM,outS}=inout[id]; const i=toSec(inM,inS),o=toSec(outM,outS); return o>i?r1(o-i):0; };
   const [swMode,setSwMode]=useState(false);
   const [measureFor,setMeasureFor]=useState<string|null>(null);
   const swCapture=(idx:number,sec:number)=>{
@@ -828,7 +829,7 @@ export default function App(){
     const inout_times=Object.fromEntries(INOUT_COURSES.map(c=>[c.id,{
       in:toSec(inout[c.id].inM,inout[c.id].inS),
       out:toSec(inout[c.id].outM,inout[c.id].outS),
-      elapsed:getInoutSec(c.id),
+      elapsed:r1(getInoutSec(c.id)),
     }]));
     const body={
       student_name:user.name,
@@ -836,9 +837,9 @@ export default function App(){
       date:isoToKR(recDate),
       obstacle_laps:lapSecs,
       inout_times,
-      total_time:finalTime,
-      total_sec:finalTime,
-      move_time:moveTime||0,
+      total_time:r1(finalTime),
+      total_sec:r1(finalTime),
+      move_time:r1(moveTime||0),
       passed:finalTime<=PASS_TIME_SEC,
       ratings,
       memo,
@@ -1275,8 +1276,8 @@ export default function App(){
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
                     <span style={{fontSize:12,color:PC.textSub}}>랩 평균</span>
                     <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                      <span style={{fontSize:13,color:PC.textSub}}>{secToDisplay(Math.round(obstacleTotalSec/6))}/랩</span>
-                      {lapSecs[0]>0&&(Math.round(obstacleTotalSec/6)-lapSecs[0])>=3&&(
+                      <span style={{fontSize:13,color:PC.textSub}}>{secToDisplay(r1(obstacleTotalSec/6))}/랩</span>
+                      {lapSecs[0]>0&&(r1(obstacleTotalSec/6)-lapSecs[0])>=3&&(
                         <span style={{fontSize:11,background:"#fff3cd",color:"#856404",borderRadius:20,padding:"2px 8px",fontWeight:600}}>⚠️ 오버페이스</span>
                       )}
                     </div>
@@ -1376,12 +1377,12 @@ export default function App(){
                 <div style={{fontSize:14,color:PC.textSub,marginBottom:6}}>{submitted.student_name}님 · {submitted.date||submitted.record_date}</div>
                 <div style={{fontSize:44,fontWeight:800,letterSpacing:-1,marginBottom:4,color:pass?PC.success:PC.danger}}>{secToMMSS(submitted.total_time)}</div>
                 <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
-                  <span style={passTag(pass)}>{pass?"✓ PASS":"✗ FAIL"} — {pass?`기준보다 ${PASS_TIME_SEC-submitted.total_time}초 빠름`:`기준보다 ${submitted.total_time-PASS_TIME_SEC}초 초과`}</span>
+                  <span style={passTag(pass)}>{pass?"✓ PASS":"✗ FAIL"} — {pass?`기준보다 ${r1(PASS_TIME_SEC-submitted.total_time)}초 빠름`:`기준보다 ${r1(submitted.total_time-PASS_TIME_SEC)}초 초과`}</span>
                   {tcb&&<Bdg {...tcb}/>}
                 </div>
               </div>
               {obs.length>0&&(()=>{
-                const avgSec=Math.round(obs[obs.length-1]/obs.length);
+                const avgSec=r1(obs[obs.length-1]/obs.length);
                 const isOverpace=avgSec>0&&obs[0]>0&&(avgSec-obs[0])>=3;
                 return(
                   <div style={card}>
@@ -1443,7 +1444,7 @@ export default function App(){
                     </div>
                     <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:PC.textSub,marginTop:3}}>
                       <span>기준 {secToDisplay(c.defaultTime)}</span>
-                      <span>{diff===0?"기준과 동일":diff>0?`${diff}초 느림`:`${Math.abs(diff)}초 빠름`}</span>
+                      <span>{diff===0?"기준과 동일":diff>0?`${r1(diff)}초 느림`:`${r1(Math.abs(diff))}초 빠름`}</span>
                     </div>
                   </div>
                 );
