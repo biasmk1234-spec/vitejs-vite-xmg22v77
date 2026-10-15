@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const SUPABASE_URL = "https://xivairsxhdzignniithm.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhpdmFpcnN4aGR6aWdubmlpdGhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0ODE0MzYsImV4cCI6MjA5NjA1NzQzNn0.C6oVIr2LVd_M3-O4tXeTis50ZA_sQ1UR5VpLQ90nrUk";
@@ -102,6 +102,186 @@ function MSInput({mVal,sVal,onM,onS}:{mVal:string,sVal:string,onM:any,onS:any}){
       <span style={{fontSize:12,color:PC.textSub}}>분</span>
       <input type="number" min={0} max={59} placeholder="초" value={sVal} onChange={onS} style={st}/>
       <span style={{fontSize:12,color:PC.textSub}}>초</span>
+    </div>
+  );
+}
+
+// ── 스톱워치 ──
+const STOPWATCH_ACADEMIES:string[]=["bias"];
+type SwStep={label:string,kind:"lap"|"in"|"out",lap?:number,course?:string};
+const SW_STEPS:SwStep[]=[
+  ...Array.from({length:6},(_,i)=>({label:`${i+1}R 통과`,kind:"lap" as const,lap:i})),
+  ...INOUT_COURSES.flatMap(c=>[
+    {label:`${c.name} IN`,kind:"in" as const,course:c.id},
+    {label:`${c.name} OUT`,kind:"out" as const,course:c.id},
+  ]),
+];
+function swFmt(ms:number){
+  const t=Math.max(0,Math.floor(ms/100));
+  return `${Math.floor(t/600)}:${pad(Math.floor((t%600)/10))}.${t%10}`;
+}
+
+function Stopwatch({onCapture,onUndo,onReset}:{onCapture:(idx:number,sec:number)=>void,onUndo:(idx:number)=>void,onReset:()=>void}){
+  const [startAt,setStartAt]=useState<number|null>(null);
+  const [now,setNow]=useState(0);
+  const [caps,setCaps]=useState<number[]>([]);
+  const done=caps.length>=SW_STEPS.length;
+
+  useEffect(()=>{
+    if(startAt===null||done)return;
+    const id=setInterval(()=>setNow(Date.now()),50);
+    return()=>clearInterval(id);
+  },[startAt,done]);
+
+  useEffect(()=>{
+    if(startAt===null||done)return;
+    let lock:any=null;
+    try{(navigator as any).wakeLock?.request("screen").then((l:any)=>{lock=l;}).catch(()=>{});}catch{}
+    return()=>{try{lock?.release();}catch{}};
+  },[startAt,done]);
+
+  const elapsed=startAt===null?0:(done?caps[caps.length-1]:Math.max(0,now-startAt));
+  const nextStep=SW_STEPS[caps.length];
+
+  function start(){const t=Date.now();setStartAt(t);setNow(t);setCaps([]);}
+  function tap(){
+    if(startAt===null||done)return;
+    const ms=Date.now()-startAt;
+    try{navigator.vibrate?.(30);}catch{}
+    const idx=caps.length;
+    setCaps(c=>[...c,ms]);
+    onCapture(idx,Math.round(ms/1000));
+  }
+  function undo(){
+    if(!caps.length)return;
+    const idx=caps.length-1;
+    setCaps(c=>c.slice(0,-1));
+    onUndo(idx);
+  }
+  function reset(){
+    if(startAt!==null&&caps.length>0&&!confirm("측정을 처음부터 다시 할까요?"))return;
+    setStartAt(null);setCaps([]);setNow(0);onReset();
+  }
+
+  const bigBtn:any={width:"100%",height:92,borderRadius:16,border:"none",background:PC.primary,color:PC.white,fontSize:22,fontWeight:800,cursor:"pointer",touchAction:"manipulation",WebkitTapHighlightColor:"transparent"};
+  const subBtn:any={flex:1,padding:"10px",borderRadius:10,border:`1px solid ${PC.border}`,background:PC.white,color:PC.text,fontSize:14,fontWeight:600,cursor:"pointer",touchAction:"manipulation"};
+
+  return(
+    <div style={{...card,border:`2px solid ${PC.primary}`}}>
+      <div style={{textAlign:"center",fontSize:46,fontWeight:800,letterSpacing:-1,fontVariantNumeric:"tabular-nums",color:PC.text,lineHeight:1.1}}>{swFmt(elapsed)}</div>
+      <div style={{textAlign:"center",fontSize:12,color:PC.textSub,margin:"4px 0 12px"}}>
+        {startAt===null?"버튼을 누르면 시간이 흐르기 시작해요":done?"측정 완료 — 시간이 칸에 입력됐어요":`${caps.length} / ${SW_STEPS.length} 기록됨 · 다음은 "${nextStep.label}"`}
+      </div>
+      {startAt===null
+        ?<button onClick={start} style={bigBtn}>▶ 측정 시작</button>
+        :done
+          ?<div style={{textAlign:"center",fontSize:15,fontWeight:700,color:PC.success,padding:"14px 0"}}>✅ 총 {swFmt(caps[caps.length-1])}</div>
+          :<button onClick={tap} style={bigBtn}>{nextStep.label}</button>}
+      <div style={{display:"flex",gap:8,marginTop:10}}>
+        <button onClick={undo} disabled={!caps.length} style={{...subBtn,opacity:caps.length?1:0.4}}>↩︎ 직전 취소</button>
+        <button onClick={reset} style={subBtn}>⟲ 처음부터</button>
+      </div>
+      {caps.length>0&&(
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:12}}>
+          {caps.map((ms,i)=>(
+            <span key={i} style={{fontSize:11,background:PC.borderLight,color:PC.textSub,borderRadius:20,padding:"3px 9px"}}>{SW_STEPS[i].label} {swFmt(ms)}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MeasureModal({studentName,source,academyCode,withLocation,onClose,onSaved}:{studentName:string,source:"bias"|"external",academyCode:string,withLocation:boolean,onClose:()=>void,onSaved:(rec:any)=>void}){
+  const [caps,setCaps]=useState<(number|null)[]>(Array(SW_STEPS.length).fill(null));
+  const [recDate,setRecDate]=useState(todayISO());
+  const [locs,setLocs]=useState<string[]>([]);
+  const [loc,setLoc]=useState("");
+  const [saving,setSaving]=useState(false);
+
+  useEffect(()=>{
+    if(!withLocation)return;
+    dbGet("locations",`academy_code=eq.${encodeURIComponent(academyCode)}&order=created_at.asc`)
+      .then((r:any)=>setLocs(Array.isArray(r)?r.map((x:any)=>x.name):[]));
+  },[]);
+
+  const sec=(i:number)=>caps[i]??0;
+  const lapSecs=[0,1,2,3,4,5].map(sec);
+  const capturedCount=caps.filter(v=>v!==null).length;
+
+  function close(){
+    if(capturedCount>0&&!confirm("측정한 기록이 저장되지 않았어요. 닫을까요?"))return;
+    onClose();
+  }
+
+  async function save(){
+    if(lapSecs[5]<=0)return;
+    const io:Record<string,{in:number,out:number}>={};
+    INOUT_COURSES.forEach((c,ci)=>{io[c.id]={in:sec(6+ci*2),out:sec(7+ci*2)};});
+    const inout_times=Object.fromEntries(INOUT_COURSES.map(c=>[c.id,{in:io[c.id].in,out:io[c.id].out,elapsed:io[c.id].out>io[c.id].in?io[c.id].out-io[c.id].in:0}]));
+    const obsTotal=lapSecs[5];
+    const pairs:[number,number][]=[[obsTotal,io.hurdle.in],[io.hurdle.out,io.resistance.in],[io.resistance.out,io.rescue.in],[io.rescue.out,io.trigger.in]];
+    let move=0;
+    pairs.forEach(([a,b])=>{if(a>0&&b>0)move+=Math.max(0,b-a);});
+    const coursesSum=obsTotal+INOUT_COURSES.reduce((s,c)=>s+inout_times[c.id].elapsed,0);
+    const finalTime=io.trigger.out>0?io.trigger.out:coursesSum+move;
+    const body:any={
+      student_name:studentName,
+      record_date:recDate,
+      date:isoToKR(recDate),
+      obstacle_laps:lapSecs,
+      inout_times,
+      total_time:finalTime,
+      total_sec:finalTime,
+      move_time:move,
+      passed:finalTime<=PASS_TIME_SEC,
+      ratings:{},
+      memo:"",
+      source,
+      academy_code:academyCode,
+    };
+    if(withLocation&&loc)body.location=loc;
+    setSaving(true);
+    try{
+      const result=await dbPost("records",body);
+      onSaved({...body,id:result?.[0]?.id||Date.now()});
+      onClose();
+    }catch(e:any){
+      alert("저장 실패: "+e.message);
+      setSaving(false);
+    }
+  }
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:1000,overflowY:"auto",display:"flex",justifyContent:"center",padding:"20px 12px"}}>
+      <div style={{background:PC.bg,borderRadius:16,width:"100%",maxWidth:460,padding:"16px 14px",alignSelf:"flex-start"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <span style={{fontSize:16,fontWeight:800,color:PC.text}}>⏱️ {studentName} 측정</span>
+          <button onClick={close} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:PC.textSub}}>✕</button>
+        </div>
+        <div style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:14,fontWeight:600,color:PC.text}}>📅 측정 날짜</span>
+          <input type="date" value={recDate} onChange={e=>setRecDate(e.target.value)} style={{border:`1px solid ${PC.border}`,borderRadius:8,padding:"7px 10px",fontSize:14,color:PC.text,background:PC.white}}/>
+        </div>
+        <Stopwatch
+          onCapture={(idx,s)=>setCaps(p=>p.map((v,i)=>i===idx?s:v))}
+          onUndo={idx=>setCaps(p=>p.map((v,i)=>i===idx?null:v))}
+          onReset={()=>setCaps(Array(SW_STEPS.length).fill(null))}
+        />
+        {withLocation&&locs.length>0&&(
+          <div style={card}>
+            <div style={{fontSize:13,fontWeight:700,color:PC.text,marginBottom:8}}>📍 측정 장소 <span style={{fontWeight:400,color:PC.textSub}}>(선택)</span></div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {locs.map(l=>(
+                <button key={l} onClick={()=>setLoc(loc===l?"":l)} style={{fontSize:13,padding:"6px 12px",borderRadius:20,border:`1.5px solid ${loc===l?PC.primary:PC.border}`,background:loc===l?PC.primary:PC.white,color:loc===l?PC.white:PC.text,cursor:"pointer",fontWeight:loc===l?700:400}}>{l}</button>
+              ))}
+            </div>
+          </div>
+        )}
+        <button onClick={save} disabled={saving||lapSecs[5]<=0} style={{...btnPrimary,width:"100%",opacity:saving||lapSecs[5]<=0?0.45:1}}>
+          {saving?"저장 중...":lapSecs[5]<=0?"6R까지 측정하면 저장할 수 있어요":"기록 저장"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -540,6 +720,22 @@ export default function App(){
   );
   const updateInout=(id:string,field:string,v:string)=>setInout(p=>({...p,[id]:{...p[id],[field]:v}}));
   const getInoutSec=(id:string)=>{ const {inM,inS,outM,outS}=inout[id]; const i=toSec(inM,inS),o=toSec(outM,outS); return o>i?o-i:0; };
+  const [swMode,setSwMode]=useState(false);
+  const [measureFor,setMeasureFor]=useState<string|null>(null);
+  const swCapture=(idx:number,sec:number)=>{
+    const st=SW_STEPS[idx]; const t=secToMS(sec);
+    if(st.kind==="lap") setLaps(p=>p.map((l,i)=>i===st.lap?{m:t.m,s:t.s}:l));
+    else setInout(p=>({...p,[st.course!]:{...p[st.course!],...(st.kind==="in"?{inM:t.m,inS:t.s}:{outM:t.m,outS:t.s})}}));
+  };
+  const swUndo=(idx:number)=>{
+    const st=SW_STEPS[idx];
+    if(st.kind==="lap") setLaps(p=>p.map((l,i)=>i===st.lap?{m:"",s:""}:l));
+    else setInout(p=>({...p,[st.course!]:{...p[st.course!],...(st.kind==="in"?{inM:"",inS:""}:{outM:"",outS:""})}}));
+  };
+  const swReset=()=>{
+    setLaps(Array(6).fill(null).map(()=>({m:"",s:""})));
+    setInout(Object.fromEntries(INOUT_COURSES.map(c=>[c.id,{inM:"",inS:"",outM:"",outS:""}])));
+  };
 
   const inoutSum=INOUT_COURSES.reduce((s,c)=>s+getInoutSec(c.id),0);
   const coursesSum=obstacleTotalSec+inoutSum;
@@ -986,6 +1182,10 @@ export default function App(){
                       </div>
                     ))}
                   </div>
+                  {activeName&&STOPWATCH_ACADEMIES.includes("bias")&&(
+                    <button onClick={()=>setMeasureFor(activeName)} style={{width:"100%",padding:"12px",borderRadius:10,border:"none",background:PC.primary,color:PC.white,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:10}}>⏱️ {activeName} 측정하기</button>
+                  )}
+                  {measureFor&&<MeasureModal studentName={measureFor} source="bias" academyCode="bias" withLocation={false} onClose={()=>setMeasureFor(null)} onSaved={rec=>setAllHist(prev=>[rec,...prev])}/>}
                   {activeName&&<HistoryList records={allHist.filter(h=>h.student_name===activeName)} onUpdate={handleAllHistUpdate} isAdmin={true}/>}
                 </>
               }
@@ -1033,6 +1233,16 @@ export default function App(){
       <div style={{padding:"1.25rem"}}>
         {tab==="record"&&(!submitted?(
           <>
+            {STOPWATCH_ACADEMIES.includes("bias")&&(
+              <>
+                <div style={{display:"flex",gap:8,marginBottom:10}}>
+                  {([[false,"✍️ 직접 입력"],[true,"⏱️ 스톱워치로 입력"]] as [boolean,string][]).map(([v,label])=>(
+                    <button key={label} onClick={()=>setSwMode(v)} style={{flex:1,padding:"10px 8px",borderRadius:10,border:`1.5px solid ${swMode===v?PC.primary:PC.border}`,background:swMode===v?PC.primaryLight:PC.white,color:swMode===v?PC.primaryDark:PC.textSub,fontSize:14,fontWeight:swMode===v?700:500,cursor:"pointer"}}>{label}</button>
+                  ))}
+                </div>
+                {swMode&&<Stopwatch onCapture={swCapture} onUndo={swUndo} onReset={swReset}/>}
+              </>
+            )}
             <div style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <span style={{fontSize:14,fontWeight:600,color:PC.text}}>📅 측정 날짜</span>
               <input type="date" value={recDate} onChange={e=>setRecDate(e.target.value)} style={{border:`1px solid ${PC.border}`,borderRadius:8,padding:"7px 10px",fontSize:14,color:PC.text,background:PC.white,cursor:"pointer"}}/>
