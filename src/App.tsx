@@ -109,13 +109,16 @@ function MSInput({mVal,sVal,onM,onS}:{mVal:string,sVal:string,onM:any,onS:any}){
 
 // ── 스톱워치 ──
 const STOPWATCH_ACADEMIES:string[]=["bias"];
-type SwStep={label:string,kind:"lap"|"in"|"out",lap?:number,course?:string};
+type SwStep={label:string,kind:"lap"|"in"|"out",lap?:number,course?:string,alsoIn?:boolean};
 const SW_STEPS:SwStep[]=[
-  ...Array.from({length:6},(_,i)=>({label:`${i+1}R 통과`,kind:"lap" as const,lap:i})),
-  ...INOUT_COURSES.flatMap(c=>[
-    {label:`${c.name} IN`,kind:"in" as const,course:c.id},
-    {label:`${c.name} OUT`,kind:"out" as const,course:c.id},
-  ]),
+  ...Array.from({length:5},(_,i)=>({label:`${i+1}R 통과`,kind:"lap" as const,lap:i})),
+  {label:"6R 통과 / 장대허들 IN",kind:"lap" as const,lap:5,course:"hurdle",alsoIn:true},
+  ...INOUT_COURSES.flatMap(c=>c.id==="hurdle"
+    ?[{label:`${c.name} OUT`,kind:"out" as const,course:c.id}]
+    :[
+      {label:`${c.name} IN`,kind:"in" as const,course:c.id},
+      {label:`${c.name} OUT`,kind:"out" as const,course:c.id},
+    ]),
 ];
 function swFmt(ms:number){
   const t=Math.max(0,Math.floor(ms/100));
@@ -218,7 +221,7 @@ function MeasureModal({studentName,source,academyCode,withLocation,onClose,onSav
   async function save(){
     if(lapSecs[5]<=0)return;
     const io:Record<string,{in:number,out:number}>={};
-    INOUT_COURSES.forEach((c,ci)=>{io[c.id]={in:sec(6+ci*2),out:sec(7+ci*2)};});
+    INOUT_COURSES.forEach((c,ci)=>{io[c.id]={in:sec(5+ci*2),out:sec(6+ci*2)};});
     const inout_times=Object.fromEntries(INOUT_COURSES.map(c=>[c.id,{in:io[c.id].in,out:io[c.id].out,elapsed:io[c.id].out>io[c.id].in?r1(io[c.id].out-io[c.id].in):0}]));
     const obsTotal=lapSecs[5];
     const pairs:[number,number][]=[[obsTotal,io.hurdle.in],[io.hurdle.out,io.resistance.in],[io.resistance.out,io.rescue.in],[io.rescue.out,io.trigger.in]];
@@ -727,11 +730,13 @@ export default function App(){
     const st=SW_STEPS[idx]; const t=secToMS(sec);
     if(st.kind==="lap") setLaps(p=>p.map((l,i)=>i===st.lap?{m:t.m,s:t.s}:l));
     else setInout(p=>({...p,[st.course!]:{...p[st.course!],...(st.kind==="in"?{inM:t.m,inS:t.s}:{outM:t.m,outS:t.s})}}));
+    if(st.alsoIn) setInout(p=>({...p,[st.course!]:{...p[st.course!],inM:t.m,inS:t.s}}));
   };
   const swUndo=(idx:number)=>{
     const st=SW_STEPS[idx];
     if(st.kind==="lap") setLaps(p=>p.map((l,i)=>i===st.lap?{m:"",s:""}:l));
     else setInout(p=>({...p,[st.course!]:{...p[st.course!],...(st.kind==="in"?{inM:"",inS:""}:{outM:"",outS:""})}}));
+    if(st.alsoIn) setInout(p=>({...p,[st.course!]:{...p[st.course!],inM:"",inS:""}}));
   };
   const swReset=()=>{
     setLaps(Array(6).fill(null).map(()=>({m:"",s:""})));
