@@ -5,6 +5,14 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const APP_TITLE = "BIAS 기록관리 시스템";
 const APP_SUBTITLE = "경찰 순환식 체력시험";
 const PASS_TIME_SEC = 280;
+const HALF_PASS_TIME_SEC = 190;
+type MType="full"|"half";
+const typeOf=(h:any):MType=>h?.measure_type==="half"?"half":"full";
+const lapsOf=(t:MType)=>t==="half"?3:6;
+const passSecOf=(t:MType)=>t==="half"?HALF_PASS_TIME_SEC:PASS_TIME_SEC;
+const obstacleStdSecOf=(t:MType)=>t==="half"?80:160;
+// 하프 측정(장애물 3랩)을 선택할 수 있게 켤 학원 코드 (BIAS 앱은 "bias")
+const HALF_ACADEMIES:string[]=["bias"];
 
 const PC = {
   primary:"#1a73e8", primaryLight:"#e8f0fe", primaryDark:"#1557b0",
@@ -110,26 +118,29 @@ function MSInput({mVal,sVal,onM,onS}:{mVal:string,sVal:string,onM:any,onS:any}){
 // ── 스톱워치 ──
 const STOPWATCH_ACADEMIES:string[]=["bias"];
 type SwStep={label:string,kind:"lap"|"in"|"out",lap?:number,course?:string,alsoIn?:boolean};
-const SW_STEPS:SwStep[]=[
-  ...Array.from({length:5},(_,i)=>({label:`${i+1}R 통과`,kind:"lap" as const,lap:i})),
-  {label:"6R 통과 / 장대허들 IN",kind:"lap" as const,lap:5,course:"hurdle",alsoIn:true},
-  ...INOUT_COURSES.flatMap(c=>c.id==="hurdle"
-    ?[{label:`${c.name} OUT`,kind:"out" as const,course:c.id}]
-    :[
-      {label:`${c.name} IN`,kind:"in" as const,course:c.id},
-      {label:`${c.name} OUT`,kind:"out" as const,course:c.id},
-    ]),
-];
+const swSteps=(t:MType):SwStep[]=>{
+  const n=lapsOf(t);
+  return [
+    ...Array.from({length:n-1},(_,i)=>({label:`${i+1}R 통과`,kind:"lap" as const,lap:i})),
+    {label:`${n}R 통과 / 장대허들 IN`,kind:"lap" as const,lap:n-1,course:"hurdle",alsoIn:true},
+    ...INOUT_COURSES.flatMap(c=>c.id==="hurdle"
+      ?[{label:`${c.name} OUT`,kind:"out" as const,course:c.id}]
+      :[
+        {label:`${c.name} IN`,kind:"in" as const,course:c.id},
+        {label:`${c.name} OUT`,kind:"out" as const,course:c.id},
+      ]),
+  ];
+};
 function swFmt(ms:number){
   const t=Math.max(0,Math.floor(ms/100));
   return `${Math.floor(t/600)}:${pad(Math.floor((t%600)/10))}.${t%10}`;
 }
 
-function Stopwatch({onCapture,onUndo,onReset}:{onCapture:(idx:number,sec:number)=>void,onUndo:(idx:number)=>void,onReset:()=>void}){
+function Stopwatch({steps,onCapture,onUndo,onReset}:{steps:SwStep[],onCapture:(idx:number,sec:number)=>void,onUndo:(idx:number)=>void,onReset:()=>void}){
   const [startAt,setStartAt]=useState<number|null>(null);
   const [now,setNow]=useState(0);
   const [caps,setCaps]=useState<number[]>([]);
-  const done=caps.length>=SW_STEPS.length;
+  const done=caps.length>=steps.length;
 
   useEffect(()=>{
     if(startAt===null||done)return;
@@ -145,7 +156,7 @@ function Stopwatch({onCapture,onUndo,onReset}:{onCapture:(idx:number,sec:number)
   },[startAt,done]);
 
   const elapsed=startAt===null?0:(done?caps[caps.length-1]:Math.max(0,now-startAt));
-  const nextStep=SW_STEPS[caps.length];
+  const nextStep=steps[caps.length];
 
   function start(){const t=Date.now();setStartAt(t);setNow(t);setCaps([]);}
   function tap(){
@@ -174,7 +185,7 @@ function Stopwatch({onCapture,onUndo,onReset}:{onCapture:(idx:number,sec:number)
     <div style={{...card,border:`2px solid ${PC.primary}`}}>
       <div style={{textAlign:"center",fontSize:46,fontWeight:800,letterSpacing:-1,fontVariantNumeric:"tabular-nums",color:PC.text,lineHeight:1.1}}>{swFmt(elapsed)}</div>
       <div style={{textAlign:"center",fontSize:12,color:PC.textSub,margin:"4px 0 12px"}}>
-        {startAt===null?"버튼을 누르면 시간이 흐르기 시작해요":done?"측정 완료 — 시간이 칸에 입력됐어요":`${caps.length} / ${SW_STEPS.length} 기록됨 · 다음은 "${nextStep.label}"`}
+        {startAt===null?"버튼을 누르면 시간이 흐르기 시작해요":done?"측정 완료 — 시간이 칸에 입력됐어요":`${caps.length} / ${steps.length} 기록됨 · 다음은 "${nextStep.label}"`}
       </div>
       {startAt===null
         ?<button onClick={start} style={bigBtn}>▶ 측정 시작</button>
@@ -188,7 +199,7 @@ function Stopwatch({onCapture,onUndo,onReset}:{onCapture:(idx:number,sec:number)
       {caps.length>0&&(
         <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:12}}>
           {caps.map((ms,i)=>(
-            <span key={i} style={{fontSize:11,background:PC.borderLight,color:PC.textSub,borderRadius:20,padding:"3px 9px"}}>{SW_STEPS[i].label} {swFmt(ms)}</span>
+            <span key={i} style={{fontSize:11,background:PC.borderLight,color:PC.textSub,borderRadius:20,padding:"3px 9px"}}>{steps[i].label} {swFmt(ms)}</span>
           ))}
         </div>
       )}
@@ -196,8 +207,12 @@ function Stopwatch({onCapture,onUndo,onReset}:{onCapture:(idx:number,sec:number)
   );
 }
 
-function MeasureModal({studentName,source,academyCode,withLocation,onClose,onSaved}:{studentName:string,source:"bias"|"external",academyCode:string,withLocation:boolean,onClose:()=>void,onSaved:(rec:any)=>void}){
-  const [caps,setCaps]=useState<(number|null)[]>(Array(SW_STEPS.length).fill(null));
+function MeasureModal({studentName,source,academyCode,withLocation,halfEnabled,onClose,onSaved}:{studentName:string,source:"bias"|"external",academyCode:string,withLocation:boolean,halfEnabled?:boolean,onClose:()=>void,onSaved:(rec:any)=>void}){
+  const [mtype,setMtype]=useState<MType>("full");
+  const steps=swSteps(mtype);
+  const nL=lapsOf(mtype);
+  const [caps,setCaps]=useState<(number|null)[]>(Array(swSteps("full").length).fill(null));
+  const switchType=(t:MType)=>{setMtype(t);setCaps(Array(swSteps(t).length).fill(null));};
   const [recDate,setRecDate]=useState(todayISO());
   const [locs,setLocs]=useState<string[]>([]);
   const [loc,setLoc]=useState("");
@@ -210,7 +225,7 @@ function MeasureModal({studentName,source,academyCode,withLocation,onClose,onSav
   },[]);
 
   const sec=(i:number)=>caps[i]??0;
-  const lapSecs=[0,1,2,3,4,5].map(sec);
+  const lapSecs=Array.from({length:nL},(_,i)=>sec(i));
   const capturedCount=caps.filter(v=>v!==null).length;
 
   function close(){
@@ -219,11 +234,11 @@ function MeasureModal({studentName,source,academyCode,withLocation,onClose,onSav
   }
 
   async function save(){
-    if(lapSecs[5]<=0)return;
+    if(lapSecs[nL-1]<=0)return;
     const io:Record<string,{in:number,out:number}>={};
-    INOUT_COURSES.forEach((c,ci)=>{io[c.id]={in:sec(5+ci*2),out:sec(6+ci*2)};});
+    INOUT_COURSES.forEach((c,ci)=>{io[c.id]={in:sec(nL-1+ci*2),out:sec(nL+ci*2)};});
     const inout_times=Object.fromEntries(INOUT_COURSES.map(c=>[c.id,{in:io[c.id].in,out:io[c.id].out,elapsed:io[c.id].out>io[c.id].in?r1(io[c.id].out-io[c.id].in):0}]));
-    const obsTotal=lapSecs[5];
+    const obsTotal=lapSecs[nL-1];
     const pairs:[number,number][]=[[obsTotal,io.hurdle.in],[io.hurdle.out,io.resistance.in],[io.resistance.out,io.rescue.in],[io.rescue.out,io.trigger.in]];
     let move=0;
     pairs.forEach(([a,b])=>{if(a>0&&b>0)move+=Math.max(0,b-a);});
@@ -238,7 +253,8 @@ function MeasureModal({studentName,source,academyCode,withLocation,onClose,onSav
       total_time:r1(finalTime),
       total_sec:r1(finalTime),
       move_time:r1(move),
-      passed:finalTime<=PASS_TIME_SEC,
+      passed:finalTime<=passSecOf(mtype),
+      measure_type:mtype,
       ratings:{_by:"coach"},
       memo:"",
       source,
@@ -267,10 +283,19 @@ function MeasureModal({studentName,source,academyCode,withLocation,onClose,onSav
           <span style={{fontSize:14,fontWeight:600,color:PC.text}}>📅 측정 날짜</span>
           <input type="date" value={recDate} onChange={e=>setRecDate(e.target.value)} style={{border:`1px solid ${PC.border}`,borderRadius:8,padding:"7px 10px",fontSize:14,color:PC.text,background:PC.white}}/>
         </div>
+        {halfEnabled&&(
+          <div style={{display:"flex",gap:8,marginBottom:10}}>
+            {([["full","FULL (6바퀴)"],["half","하프 (3바퀴)"]] as [MType,string][]).map(([v,label])=>(
+              <button key={v} onClick={()=>mtype!==v&&(capturedCount===0||confirm("측정 종류를 바꾸면 지금까지 측정한 값이 지워져요. 바꿀까요?"))&&switchType(v)} style={{flex:1,padding:"10px 8px",borderRadius:10,border:`1.5px solid ${mtype===v?PC.primary:PC.border}`,background:mtype===v?PC.primaryLight:PC.white,color:mtype===v?PC.primaryDark:PC.textSub,fontSize:14,fontWeight:mtype===v?700:500,cursor:"pointer"}}>{label}</button>
+            ))}
+          </div>
+        )}
         <Stopwatch
+          key={mtype}
+          steps={steps}
           onCapture={(idx,s)=>setCaps(p=>p.map((v,i)=>i===idx?s:v))}
           onUndo={idx=>setCaps(p=>p.map((v,i)=>i===idx?null:v))}
-          onReset={()=>setCaps(Array(SW_STEPS.length).fill(null))}
+          onReset={()=>setCaps(Array(steps.length).fill(null))}
         />
         {withLocation&&locs.length>0&&(
           <div style={card}>
@@ -282,8 +307,8 @@ function MeasureModal({studentName,source,academyCode,withLocation,onClose,onSav
             </div>
           </div>
         )}
-        <button onClick={save} disabled={saving||lapSecs[5]<=0} style={{...btnPrimary,width:"100%",opacity:saving||lapSecs[5]<=0?0.45:1}}>
-          {saving?"저장 중...":lapSecs[5]<=0?"6R까지 측정하면 저장할 수 있어요":"기록 저장"}
+        <button onClick={save} disabled={saving||lapSecs[nL-1]<=0} style={{...btnPrimary,width:"100%",opacity:saving||lapSecs[nL-1]<=0?0.45:1}}>
+          {saving?"저장 중...":lapSecs[nL-1]<=0?`${nL}R까지 측정하면 저장할 수 있어요`:"기록 저장"}
         </button>
       </div>
     </div>
@@ -346,6 +371,7 @@ function RatingModal({data,onClose,onSave}:{data:any,onClose:()=>void,onSave:(u:
 
 // ── 수정 모달 ──
 function EditModal({h, onClose, onSave}:{h:any, onClose:()=>void, onSave:(updated:any)=>void}){
+  const nL=lapsOf(typeOf(h));
   const initLaps=(obs:number[])=>{
     const arr=Array(6).fill(null).map(()=>({m:"",s:""}));
     (obs||[]).forEach((cum,i)=>{ const ms=secToMS(cum); arr[i]={m:ms.m,s:ms.s}; });
@@ -380,7 +406,7 @@ function EditModal({h, onClose, onSave}:{h:any, onClose:()=>void, onSave:(update
 
   const getMoveTimes=()=>{
     const moves:number[]=[];
-    const obsOut=lapSecs[5];
+    const obsOut=lapSecs[nL-1];
     const hIn=toSec(inout.hurdle.inM,inout.hurdle.inS); if(obsOut>0&&hIn>0)moves.push(Math.max(0,hIn-obsOut));
     const hOut=toSec(inout.hurdle.outM,inout.hurdle.outS); const rIn=toSec(inout.resistance.inM,inout.resistance.inS); if(hOut>0&&rIn>0)moves.push(Math.max(0,rIn-hOut));
     const rOut=toSec(inout.resistance.outM,inout.resistance.outS); const scIn=toSec(inout.rescue.inM,inout.rescue.inS); if(rOut>0&&scIn>0)moves.push(Math.max(0,scIn-rOut));
@@ -390,7 +416,7 @@ function EditModal({h, onClose, onSave}:{h:any, onClose:()=>void, onSave:(update
   const moveTimes=getMoveTimes();
   const totalMoveTime=moveTimes.reduce((s,v)=>s+v,0);
   const triggerOut=toSec(inout.trigger.outM,inout.trigger.outS);
-  const obstacleTotalSec=lapSecs[5]||0;
+  const obstacleTotalSec=lapSecs[nL-1]||0;
   const inoutSum=INOUT_COURSES.reduce((s,c)=>s+getInoutSec(c.id),0);
   const finalTime=triggerOut>0?triggerOut:obstacleTotalSec+inoutSum+totalMoveTime;
 
@@ -414,12 +440,12 @@ function EditModal({h, onClose, onSave}:{h:any, onClose:()=>void, onSave:(update
       elapsed:r1(getInoutSec(c.id)),
     }]));
     const body={
-      obstacle_laps:lapSecs,
+      obstacle_laps:lapSecs.slice(0,nL),
       inout_times,
       total_time:r1(finalTime),
       total_sec:r1(finalTime),
       move_time:r1(totalMoveTime||0),
-      passed:finalTime<=PASS_TIME_SEC,
+      passed:finalTime<=passSecOf(typeOf(h)),
       ratings,
       memo,
       record_date:recDateEdit,
@@ -449,7 +475,7 @@ function EditModal({h, onClose, onSave}:{h:any, onClose:()=>void, onSave:(update
         {/* 장애물 6랩 */}
         <div style={{...card,marginBottom:10}}>
           <div style={{fontWeight:700,fontSize:14,color:PC.text,marginBottom:10}}>🏃 장애물달리기 (누적시간)</div>
-          {laps.map((l,i)=>{
+          {laps.slice(0,nL).map((l,i)=>{
             const cumSec=lapSecs[i];
             const prevSec=i>0?lapSecs[i-1]:0;
             const interval=cumSec>0&&(i===0||prevSec>0)?cumSec-prevSec:null;
@@ -509,7 +535,7 @@ function EditModal({h, onClose, onSave}:{h:any, onClose:()=>void, onSave:(update
             <span style={{fontWeight:700,color:PC.primaryDark}}>수정 후 총시간</span>
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
               <span style={{fontSize:20,fontWeight:800,color:PC.primaryDark}}>{secToMMSS(finalTime)}</span>
-              <span style={passTag(finalTime<=PASS_TIME_SEC)}>{finalTime<=PASS_TIME_SEC?"PASS":"FAIL"}</span>
+              <span style={passTag(finalTime<=passSecOf(typeOf(h)))}>{finalTime<=passSecOf(typeOf(h))?"PASS":"FAIL"}</span>
             </div>
           </div>
         )}
@@ -608,7 +634,7 @@ function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated
           </div>
           <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>
             <span style={{fontWeight:700,color:PC.text}}>{secToMMSS(data.total_time||data.total_sec||0)}</span>
-            <span style={passTag((data.total_time||data.total_sec||0)<=PASS_TIME_SEC)}>{(data.total_time||data.total_sec||0)<=PASS_TIME_SEC?"PASS":"FAIL"}</span>
+            {typeOf(data)==="half"&&<span style={{fontSize:11,fontWeight:700,background:"#fef7e0",color:"#b06000",borderRadius:20,padding:"3px 9px"}}>하프</span>}<span style={passTag((data.total_time||data.total_sec||0)<=passSecOf(typeOf(data)))}>{(data.total_time||data.total_sec||0)<=passSecOf(typeOf(data))?"PASS":"FAIL"}</span>
             {cb&&<Bdg {...cb}/>}
             <button onClick={()=>setEditing(true)} style={{background:PC.borderLight,border:"none",borderRadius:8,padding:"4px 10px",fontSize:12,color:PC.textSub,cursor:"pointer",fontWeight:600}}>✏️ 수정</button>
           </div>
@@ -679,7 +705,11 @@ function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated
 }
 
 function HistoryList({records,onUpdate,isAdmin}:{records:any[],onUpdate?:(updated:any)=>void,isAdmin?:boolean}){
-  const sorted=[...records].sort((a,b)=>{
+  const hasHalf=records.some(r=>typeOf(r)==="half");
+  const hasFull=records.some(r=>typeOf(r)==="full");
+  const [ht,setHt]=useState<MType>("full");
+  const curType:MType=hasHalf&&hasFull?ht:(hasHalf?"half":"full");
+  const sorted=[...records.filter(r=>typeOf(r)===curType)].sort((a,b)=>{
     const da=(a.date||a.record_date||"").replace(/\./g,"-");
     const db2=(b.date||b.record_date||"").replace(/\./g,"-");
     if(db2>da)return 1; if(db2<da)return -1; return 0;
@@ -689,6 +719,13 @@ function HistoryList({records,onUpdate,isAdmin}:{records:any[],onUpdate?:(update
   const getElapsed=(h:any,id:string)=>{ const d=h.inout_times?.[id]; if(!d)return h.times?.[id]||0; if(typeof d==="object")return d.elapsed||0; return d; };
   return(
     <div>
+      {hasHalf&&hasFull&&(
+        <div style={{display:"flex",gap:8,marginBottom:10}}>
+          {([["full","FULL"],["half","하프"]] as [MType,string][]).map(([v,label])=>(
+            <button key={v} onClick={()=>setHt(v)} style={{flex:1,padding:"8px",borderRadius:10,border:`1.5px solid ${curType===v?PC.primary:PC.border}`,background:curType===v?PC.primaryLight:PC.white,color:curType===v?PC.primaryDark:PC.textSub,fontSize:13,fontWeight:curType===v?700:500,cursor:"pointer"}}>{label} ({records.filter(r=>typeOf(r)===v).length})</button>
+          ))}
+        </div>
+      )}
       {sorted.length>=2&&(
         <button onClick={()=>setCmp(v=>!v)} style={{padding:"7px 16px",fontSize:13,fontWeight:600,borderRadius:20,border:`1.5px solid ${PC.primary}`,background:cmp?PC.primary:PC.white,color:cmp?PC.white:PC.primary,cursor:"pointer",marginBottom:14}}>
           {cmp?"▼ 비교 닫기":"📊 기록 비교 보기"}
@@ -720,7 +757,7 @@ function HistoryList({records,onUpdate,isAdmin}:{records:any[],onUpdate?:(update
               </tr>
               <tr style={{borderTop:`1px solid ${PC.border}`}}>
                 <td style={{padding:"8px",fontWeight:700,fontSize:13,color:PC.text}}>총시간</td>
-                {sorted.map((h,i)=>{ const t=getTotal(h); const cb=cBdg(sorted[i+1]?t-getTotal(sorted[i+1]):null); return <td key={i} style={{textAlign:"right",padding:"8px",fontWeight:700,whiteSpace:"nowrap"}}><span style={{color:t<=PASS_TIME_SEC?PC.success:PC.danger}}>{secToMMSS(t)}</span>{cb&&<span style={{marginLeft:3,fontSize:11,color:cb.fg}}>{cb.txt}</span>}</td>; })}
+                {sorted.map((h,i)=>{ const t=getTotal(h); const cb=cBdg(sorted[i+1]?t-getTotal(sorted[i+1]):null); return <td key={i} style={{textAlign:"right",padding:"8px",fontWeight:700,whiteSpace:"nowrap"}}><span style={{color:t<=passSecOf(curType)?PC.success:PC.danger}}>{secToMMSS(t)}</span>{cb&&<span style={{marginLeft:3,fontSize:11,color:cb.fg}}>{cb.txt}</span>}</td>; })}
               </tr>
             </tbody>
           </table>
@@ -773,10 +810,12 @@ export default function App(){
     setAllStudents(prev=>prev.map(s=>s.id===studentId?{...s,class_name:className}:s));
   };
 
+  const [mtype,setMtype]=useState<MType>("full");
+  const nL=lapsOf(mtype);
   const [laps,setLaps]=useState<{m:string,s:string}[]>(Array(6).fill(null).map(()=>({m:"",s:""})));
   const updateLap=(i:number,field:"m"|"s",v:string)=>setLaps(prev=>prev.map((l,idx)=>idx===i?{...l,[field]:v}:l));
   const lapSecs=laps.map(l=>toSec(l.m,l.s));
-  const obstacleTotalSec=lapSecs[5]||0;
+  const obstacleTotalSec=lapSecs[nL-1]||0;
 
   const [inout,setInout]=useState<Record<string,{inM:string,inS:string,outM:string,outS:string}>>(
     Object.fromEntries(INOUT_COURSES.map(c=>[c.id,{inM:"",inS:"",outM:"",outS:""}]))
@@ -786,13 +825,13 @@ export default function App(){
   const [swMode,setSwMode]=useState(false);
   const [measureFor,setMeasureFor]=useState<string|null>(null);
   const swCapture=(idx:number,sec:number)=>{
-    const st=SW_STEPS[idx]; const t=secToMS(sec);
+    const st=swSteps(mtype)[idx]; const t=secToMS(sec);
     if(st.kind==="lap") setLaps(p=>p.map((l,i)=>i===st.lap?{m:t.m,s:t.s}:l));
     else setInout(p=>({...p,[st.course!]:{...p[st.course!],...(st.kind==="in"?{inM:t.m,inS:t.s}:{outM:t.m,outS:t.s})}}));
     if(st.alsoIn) setInout(p=>({...p,[st.course!]:{...p[st.course!],inM:t.m,inS:t.s}}));
   };
   const swUndo=(idx:number)=>{
-    const st=SW_STEPS[idx];
+    const st=swSteps(mtype)[idx];
     if(st.kind==="lap") setLaps(p=>p.map((l,i)=>i===st.lap?{m:"",s:""}:l));
     else setInout(p=>({...p,[st.course!]:{...p[st.course!],...(st.kind==="in"?{inM:"",inS:""}:{outM:"",outS:""})}}));
     if(st.alsoIn) setInout(p=>({...p,[st.course!]:{...p[st.course!],inM:"",inS:""}}));
@@ -819,7 +858,7 @@ export default function App(){
   const triggerOut=toSec(inout.trigger.outM,inout.trigger.outS);
   const finalTime=triggerOut>0?triggerOut:coursesSum+totalMoveTime;
   const moveTime=totalMoveTime>0?totalMoveTime:null;
-  const allFilled=lapSecs[5]>0;
+  const allFilled=lapSecs[nL-1]>0;
 
   const [ratings,setRatings]=useState<Record<string,number|null>>({});
   const [memo,setMemo]=useState("");
@@ -899,12 +938,13 @@ export default function App(){
       student_name:user.name,
       record_date:recDate,
       date:isoToKR(recDate),
-      obstacle_laps:lapSecs,
+      obstacle_laps:lapSecs.slice(0,nL),
       inout_times,
       total_time:r1(finalTime),
       total_sec:r1(finalTime),
       move_time:r1(moveTime||0),
-      passed:finalTime<=PASS_TIME_SEC,
+      passed:finalTime<=passSecOf(mtype),
+      measure_type:mtype,
       ratings,
       memo,
       source:"bias",
@@ -1250,7 +1290,7 @@ export default function App(){
                   {activeName&&STOPWATCH_ACADEMIES.includes("bias")&&(
                     <button onClick={()=>setMeasureFor(activeName)} style={{width:"100%",padding:"12px",borderRadius:10,border:"none",background:PC.primary,color:PC.white,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:10}}>⏱️ {activeName} 측정하기</button>
                   )}
-                  {measureFor&&<MeasureModal studentName={measureFor} source="bias" academyCode="bias" withLocation={false} onClose={()=>setMeasureFor(null)} onSaved={rec=>setAllHist(prev=>[rec,...prev])}/>}
+                  {measureFor&&<MeasureModal studentName={measureFor} source="bias" academyCode="bias" withLocation={false} halfEnabled={HALF_ACADEMIES.includes("bias")} onClose={()=>setMeasureFor(null)} onSaved={rec=>setAllHist(prev=>[rec,...prev])}/>}
                   {activeName&&<HistoryList records={allHist.filter(h=>h.student_name===activeName)} onUpdate={handleAllHistUpdate} isAdmin={true}/>}
                 </>
               }
@@ -1298,6 +1338,13 @@ export default function App(){
       <div style={{padding:"1.25rem"}}>
         {tab==="record"&&(!submitted?(
           <>
+            {HALF_ACADEMIES.includes("bias")&&(
+              <div style={{display:"flex",gap:8,marginBottom:10}}>
+                {([["full","FULL (6바퀴)"],["half","하프 (3바퀴)"]] as [MType,string][]).map(([v,label])=>(
+                  <button key={v} onClick={()=>{if(v===mtype)return;setMtype(v);swReset();}} style={{flex:1,padding:"10px 8px",borderRadius:10,border:`1.5px solid ${mtype===v?PC.primary:PC.border}`,background:mtype===v?PC.primaryLight:PC.white,color:mtype===v?PC.primaryDark:PC.textSub,fontSize:14,fontWeight:mtype===v?700:500,cursor:"pointer"}}>{label}</button>
+                ))}
+              </div>
+            )}
             {STOPWATCH_ACADEMIES.includes("bias")&&(
               <>
                 <div style={{display:"flex",gap:8,marginBottom:10}}>
@@ -1305,7 +1352,7 @@ export default function App(){
                     <button key={label} onClick={()=>setSwMode(v)} style={{flex:1,padding:"10px 8px",borderRadius:10,border:`1.5px solid ${swMode===v?PC.primary:PC.border}`,background:swMode===v?PC.primaryLight:PC.white,color:swMode===v?PC.primaryDark:PC.textSub,fontSize:14,fontWeight:swMode===v?700:500,cursor:"pointer"}}>{label}</button>
                   ))}
                 </div>
-                {swMode&&<Stopwatch onCapture={swCapture} onUndo={swUndo} onReset={swReset}/>}
+                {swMode&&<Stopwatch key={mtype} steps={swSteps(mtype)} onCapture={swCapture} onUndo={swUndo} onReset={swReset}/>}
               </>
             )}
             <div style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -1315,10 +1362,10 @@ export default function App(){
             <div style={card}>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}>
                 <span style={{fontWeight:700,fontSize:14,color:PC.text}}>🏃 장애물달리기</span>
-                <span style={{fontSize:12,color:PC.textSub,background:PC.borderLight,borderRadius:20,padding:"3px 10px"}}>기준 2분 40초</span>
+                <span style={{fontSize:12,color:PC.textSub,background:PC.borderLight,borderRadius:20,padding:"3px 10px"}}>기준 {secToDisplay(obstacleStdSecOf(mtype))}</span>
               </div>
               <div style={{fontSize:12,color:PC.textSub,marginBottom:10}}>각 바퀴 통과 시 누적 시간을 입력하세요</div>
-              {laps.map((l,i)=>{
+              {laps.slice(0,nL).map((l,i)=>{
                 const cumSec=lapSecs[i];
                 const prevSec=i>0?lapSecs[i-1]:0;
                 const interval=cumSec>0&&(i===0||prevSec>0)?cumSec-prevSec:null;
@@ -1340,8 +1387,8 @@ export default function App(){
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
                     <span style={{fontSize:12,color:PC.textSub}}>랩 평균</span>
                     <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                      <span style={{fontSize:13,color:PC.textSub}}>{secToDisplay(r1(obstacleTotalSec/6))}/랩</span>
-                      {lapSecs[0]>0&&(r1(obstacleTotalSec/6)-lapSecs[0])>=3&&(
+                      <span style={{fontSize:13,color:PC.textSub}}>{secToDisplay(r1(obstacleTotalSec/nL))}/랩</span>
+                      {lapSecs[0]>0&&(r1(obstacleTotalSec/nL)-lapSecs[0])>=3&&(
                         <span style={{fontSize:11,background:"#fff3cd",color:"#856404",borderRadius:20,padding:"2px 8px",fontWeight:600}}>⚠️ 오버페이스</span>
                       )}
                     </div>
@@ -1431,8 +1478,10 @@ export default function App(){
             <button onClick={handleSubmit} disabled={!allFilled||loading} style={btnPrimary}>{loading?"저장 중...":"기록 저장"}</button>
           </>
         ):(()=>{
-          const pass=finalTime<=PASS_TIME_SEC;
-          const prev=myHist[1]||null;
+          const st=typeOf(submitted);
+          const passSec=passSecOf(st);
+          const pass=finalTime<=passSec;
+          const prev=myHist.filter(r=>typeOf(r)===st)[1]||null;
           const tcb=cBdg(prev?submitted.total_time-prev.total_time:null);
           const obs:number[]=submitted.obstacle_laps||[];
           return(
@@ -1441,7 +1490,8 @@ export default function App(){
                 <div style={{fontSize:14,color:PC.textSub,marginBottom:6}}>{submitted.student_name}님 · {submitted.date||submitted.record_date}</div>
                 <div style={{fontSize:44,fontWeight:800,letterSpacing:-1,marginBottom:4,color:pass?PC.success:PC.danger}}>{secToMMSS(submitted.total_time)}</div>
                 <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
-                  <span style={passTag(pass)}>{pass?"✓ PASS":"✗ FAIL"} — {pass?`기준보다 ${r1(PASS_TIME_SEC-submitted.total_time)}초 빠름`:`기준보다 ${r1(submitted.total_time-PASS_TIME_SEC)}초 초과`}</span>
+                  {st==="half"&&<span style={{fontSize:12,fontWeight:700,background:"#fef7e0",color:"#b06000",borderRadius:20,padding:"4px 10px"}}>하프 측정</span>}
+                  <span style={passTag(pass)}>{pass?"✓ PASS":"✗ FAIL"} — {pass?`기준보다 ${r1(passSec-submitted.total_time)}초 빠름`:`기준보다 ${r1(submitted.total_time-passSec)}초 초과`}</span>
                   {tcb&&<Bdg {...tcb}/>}
                 </div>
               </div>
