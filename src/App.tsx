@@ -13,6 +13,8 @@ const passSecOf=(t:MType)=>t==="half"?HALF_PASS_TIME_SEC:PASS_TIME_SEC;
 const obstacleStdSecOf=(t:MType)=>t==="half"?80:160;
 // 하프 측정(장애물 3랩)을 선택할 수 있게 켤 학원 코드 (BIAS 앱은 "bias")
 const HALF_ACADEMIES:string[]=["bias"];
+const classRank=(s:string)=>/^[A-Za-z]/.test(s)?0:1;
+const byClassName=(a:string,b:string)=>classRank(a)-classRank(b)||a.localeCompare(b,"ko",{numeric:true});
 
 const PC = {
   primary:"#1a73e8", primaryLight:"#e8f0fe", primaryDark:"#1557b0",
@@ -898,7 +900,7 @@ export default function App(){
         }
         if(allOk)localStorage.removeItem("bias_classes");
       }catch{}
-      setClasses(names);
+      setClasses([...names].sort(byClassName));
       setScreen("admin");setLoading(false);return;
     }
     try{
@@ -1166,7 +1168,7 @@ export default function App(){
                   if(!name||!name.trim())return;
                   const nm=name.trim();
                   if(classes.includes(nm)){alert("이미 있는 반 이름입니다.");return;}
-                  adm("admin_class_add",{p_name:nm}).then((ok:boolean)=>{if(ok)setClasses(prev=>[...prev,nm]);else alert("이미 있는 반 이름입니다.");}).catch((e:any)=>alert("반 추가 실패: "+e.message));
+                  adm("admin_class_add",{p_name:nm}).then((ok:boolean)=>{if(ok)setClasses(prev=>[...prev,nm].sort(byClassName));else alert("이미 있는 반 이름입니다.");}).catch((e:any)=>alert("반 추가 실패: "+e.message));
                 }} style={{padding:"7px 16px",borderRadius:20,border:`1.5px solid ${PC.primary}`,background:PC.white,color:PC.primary,fontSize:13,fontWeight:700,cursor:"pointer"}}>+ 반 추가</button>
                 <input
                   type="text"
@@ -1205,7 +1207,7 @@ export default function App(){
                               const nn=newName.trim();
                               adm("admin_class_rename",{p_old:cls,p_new:nn}).then((ok:boolean)=>{
                                 if(!ok){alert("반 이름을 바꾸지 못했어요.");return;}
-                                setClasses(prev=>prev.map(c=>c===cls?nn:c));
+                                setClasses(prev=>prev.map(c=>c===cls?nn:c).sort(byClassName));
                                 setAllStudents(prev=>prev.map(s=>s.class_name===cls?{...s,class_name:nn}:s));
                               }).catch((e:any)=>alert("반 이름 변경 실패: "+e.message));
                             }} style={{fontSize:11,padding:"2px 6px",borderRadius:6,border:`1px solid ${PC.border}`,background:"none",cursor:"pointer",color:PC.textSub}}>수정</button>
