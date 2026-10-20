@@ -798,11 +798,10 @@ export default function App(){
   const [selAcademy,setSelAcademy]=useState("");
   const [extLocFilter,setExtLocFilter]=useState("");
   const [classSearch,setClassSearch]=useState("");
-  const [classes,setClasses]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("bias_classes")||"[]");}catch{return [];}});
+  const [classes,setClasses]=useState<string[]>([]);
   const [dragStudentId,setDragStudentId]=useState<string|null>(null);
   const [dragOverClass,setDragOverClass]=useState<string|null>(null);
   const [classViewStu,setClassViewStu]=useState<string|null>(null);
-  const saveClasses=(list:string[])=>{setClasses(list);localStorage.setItem("bias_classes",JSON.stringify(list));};
   const [masterPw,setMasterPw]=useState("");
   const adm=(fn:string,args:any)=>dbRpc(fn,{p_code:"",p_pw:masterPw,...args});
   const moveStudentToClass=async(studentId:string,className:string|null)=>{
@@ -888,6 +887,18 @@ export default function App(){
       ]);
       setAllHist(Array.isArray(rows)?rows:[]);
       setAllStudents(Array.isArray(stus)?stus:[]);
+      const cls=await dbGet("classes","academy_code=eq.bias&order=created_at.asc");
+      const names:string[]=Array.isArray(cls)?cls.map((c:any)=>c.name):[];
+      try{
+        const local:string[]=JSON.parse(localStorage.getItem("bias_classes")||"[]");
+        let allOk=true;
+        for(const n of local){
+          if(names.includes(n))continue;
+          try{ await dbRpc("admin_class_add",{p_code:"",p_pw:loginPw,p_name:n}); names.push(n); }catch{ allOk=false; }
+        }
+        if(allOk)localStorage.removeItem("bias_classes");
+      }catch{}
+      setClasses(names);
       setScreen("admin");setLoading(false);return;
     }
     try{
@@ -1153,8 +1164,9 @@ export default function App(){
                 <button onClick={()=>{
                   const name=prompt("새 반 이름을 입력하세요:");
                   if(!name||!name.trim())return;
-                  if(classes.includes(name.trim())){alert("이미 있는 반 이름입니다.");return;}
-                  saveClasses([...classes,name.trim()]);
+                  const nm=name.trim();
+                  if(classes.includes(nm)){alert("이미 있는 반 이름입니다.");return;}
+                  adm("admin_class_add",{p_name:nm}).then((ok:boolean)=>{if(ok)setClasses(prev=>[...prev,nm]);else alert("이미 있는 반 이름입니다.");}).catch((e:any)=>alert("반 추가 실패: "+e.message));
                 }} style={{padding:"7px 16px",borderRadius:20,border:`1.5px solid ${PC.primary}`,background:PC.white,color:PC.primary,fontSize:13,fontWeight:700,cursor:"pointer"}}>+ 반 추가</button>
                 <input
                   type="text"
@@ -1190,14 +1202,16 @@ export default function App(){
                               const newName=prompt("반 이름 수정:",cls);
                               if(!newName||!newName.trim()||newName.trim()===cls)return;
                               if(classes.includes(newName.trim())){alert("이미 있는 반 이름입니다.");return;}
-                              const updated=classes.map(c=>c===cls?newName.trim():c);
-                              saveClasses(updated);
-                              setAllStudents(prev=>prev.map(s=>s.class_name===cls?{...s,class_name:newName.trim()}:s));
-                              approvedStudents.filter((s:any)=>s.class_name===cls).forEach((s:any)=>adm("admin_set_class",{p_id:s.id,p_class:newName.trim()}));
+                              const nn=newName.trim();
+                              adm("admin_class_rename",{p_old:cls,p_new:nn}).then((ok:boolean)=>{
+                                if(!ok){alert("반 이름을 바꾸지 못했어요.");return;}
+                                setClasses(prev=>prev.map(c=>c===cls?nn:c));
+                                setAllStudents(prev=>prev.map(s=>s.class_name===cls?{...s,class_name:nn}:s));
+                              }).catch((e:any)=>alert("반 이름 변경 실패: "+e.message));
                             }} style={{fontSize:11,padding:"2px 6px",borderRadius:6,border:`1px solid ${PC.border}`,background:"none",cursor:"pointer",color:PC.textSub}}>수정</button>
                             {students.length===0&&<button onClick={()=>{
                               if(!confirm(`"${cls}" 반을 삭제할까요?`))return;
-                              saveClasses(classes.filter(c=>c!==cls));
+                              adm("admin_class_delete",{p_name:cls}).then(()=>setClasses(prev=>prev.filter(c=>c!==cls))).catch((e:any)=>alert("반 삭제 실패: "+e.message));
                             }} style={{fontSize:11,padding:"2px 6px",borderRadius:6,border:`1px solid ${PC.border}`,background:"none",cursor:"pointer",color:PC.danger}}>삭제</button>}
                           </div>
                         )}
