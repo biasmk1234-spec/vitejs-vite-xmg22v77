@@ -727,6 +727,44 @@ function AdminCommentBox({data,onSave}:{data:any,onSave:(updated:any)=>void}){
   );
 }
 
+// ── 코치 음성 메모 수정 (관리자) ──
+function CoachVoiceBox({data,onSave}:{data:any,onSave:(updated:any)=>void}){
+  const [open,setOpen]=useState(false);
+  const [text,setText]=useState(data.coach_voice||"");
+  const [saving,setSaving]=useState(false);
+  async function save(){
+    setSaving(true);
+    try{
+      const v=text.trim()||null;
+      await dbPatch("records",data.id,{coach_voice:v});
+      onSave({...data,coach_voice:v});
+      setOpen(false);
+    }catch(e:any){alert("저장 실패: "+e.message);}
+    setSaving(false);
+  }
+  return(
+    <div style={{marginTop:6,paddingTop:6,borderTop:`1px solid ${PC.borderLight}`}}>
+      {!open?(
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          {data.coach_voice
+            ?<span style={{fontSize:12,color:PC.text,flex:1,whiteSpace:"pre-wrap",lineHeight:1.5}}><b>🗣️ 코치 음성 메모</b>{"\n"}{data.coach_voice}</span>
+            :<span style={{fontSize:12,color:PC.textLight,flex:1}}>🗣️ 코치 음성 메모 없음</span>}
+          <button onClick={()=>{setText(data.coach_voice||"");setOpen(true);}} style={{background:PC.primaryLight,border:"none",borderRadius:8,padding:"4px 10px",fontSize:12,color:PC.primaryDark,cursor:"pointer",fontWeight:600,marginLeft:8,whiteSpace:"nowrap"}}>{data.coach_voice?"✏️ 수정":"+ 추가"}</button>
+        </div>
+      ):(
+        <div>
+          <div style={{fontSize:12,fontWeight:700,color:PC.text,marginBottom:4}}>🗣️ 코치 음성 메모 <span style={{fontWeight:400,color:PC.textSub}}>(비우고 저장하면 삭제)</span></div>
+          <textarea rows={3} value={text} onChange={e=>setText(e.target.value)} placeholder="코치 음성 메모" style={{...inSt,fontSize:13,resize:"vertical" as const,marginBottom:6}}/>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={()=>setOpen(false)} style={{flex:1,padding:"7px",borderRadius:8,border:`1px solid ${PC.border}`,background:PC.white,color:PC.textSub,fontSize:13,cursor:"pointer"}}>취소</button>
+            <button onClick={save} disabled={saving} style={{flex:2,padding:"7px",borderRadius:8,border:"none",background:PC.primary,color:PC.white,fontSize:13,fontWeight:700,cursor:"pointer"}}>{saving?"저장 중...":"저장"}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated:any)=>void,isAdmin?:boolean}){
   const [editing,setEditing]=useState(false);
   const [ratingOpen,setRatingOpen]=useState(false);
@@ -816,7 +854,8 @@ function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated
             {RATING_KEYS.map(({key,label})=>r[key]?<span key={key} style={{fontSize:12,background:PC.borderLight,color:PC.textSub,borderRadius:20,padding:"3px 10px"}}>{label} {r[key]}/5</span>:null)}
           </div>
         )}
-        {data.coach_voice&&<div style={{fontSize:12,color:PC.text,marginTop:6,paddingTop:6,borderTop:`1px solid ${PC.borderLight}`,whiteSpace:"pre-wrap",lineHeight:1.5}}><b>🗣️ 코치 음성 메모</b>{"\n"}{data.coach_voice}</div>}
+        {isAdmin&&(data.coach_voice||data.ratings?._by==="coach")&&<CoachVoiceBox data={data} onSave={d=>{setData(d);onUpdate&&onUpdate(d);}}/>}
+        {!isAdmin&&data.coach_voice&&<div style={{fontSize:12,color:PC.text,marginTop:6,paddingTop:6,borderTop:`1px solid ${PC.borderLight}`,whiteSpace:"pre-wrap",lineHeight:1.5}}><b>🗣️ 코치 음성 메모</b>{"\n"}{data.coach_voice}</div>}
         {data.memo&&<div style={{fontSize:12,color:PC.textSub,marginTop:6,paddingTop:6,borderTop:`1px solid ${PC.borderLight}`}}>📝 {data.memo}</div>}
         {!isAdmin&&data.ratings?._by==="coach"&&!hasR&&!data.memo&&(
           <button onClick={e=>{e.stopPropagation();setRatingOpen(true);}} style={{width:"100%",marginTop:8,padding:"9px 12px",borderRadius:8,border:`1px dashed ${PC.primary}`,background:PC.primaryLight,color:PC.primaryDark,fontSize:13,fontWeight:700,cursor:"pointer"}}>📝 체감 난이도 · 느낀점 남기기</button>
