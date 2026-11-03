@@ -138,7 +138,7 @@ function swFmt(ms:number){
   return `${Math.floor(t/600)}:${pad(Math.floor((t%600)/10))}.${t%10}`;
 }
 
-function Stopwatch({steps,onCapture,onUndo,onReset}:{steps:SwStep[],onCapture:(idx:number,sec:number)=>void,onUndo:(idx:number)=>void,onReset:()=>void}){
+function Stopwatch({steps,onCapture,onUndo,onReset,onStart}:{steps:SwStep[],onCapture:(idx:number,sec:number)=>void,onUndo:(idx:number)=>void,onReset:()=>void,onStart?:()=>void}){
   const [startAt,setStartAt]=useState<number|null>(null);
   const [now,setNow]=useState(0);
   const [caps,setCaps]=useState<number[]>([]);
@@ -160,7 +160,7 @@ function Stopwatch({steps,onCapture,onUndo,onReset}:{steps:SwStep[],onCapture:(i
   const elapsed=startAt===null?0:(done?caps[caps.length-1]:Math.max(0,now-startAt));
   const nextStep=steps[caps.length];
 
-  function start(){const t=Date.now();setStartAt(t);setNow(t);setCaps([]);}
+  function start(){const t=Date.now();setStartAt(t);setNow(t);setCaps([]);onStart?.();}
   function tap(){
     if(startAt===null||done)return;
     const ms=Date.now()-startAt;
@@ -226,24 +226,44 @@ const recMime=()=>{
 };
 const extOf=(mime:string)=>mime.includes("mp4")?"m4a":mime.includes("ogg")?"ogg":"webm";
 
-function VoiceTest({pw}:{pw:string}){
-  const [open,setOpen]=useState(false);
-  const [recording,setRecording]=useState(false);
-  const [sec,setSec]=useState(0);
-  const [busy,setBusy]=useState(false);
-  const [text,setText]=useState("");
-  const [err,setErr]=useState("");
-  const recRef=useRef<any>(null);
-  const timerRef=useRef<any>(null);
+function MeasureModal({studentName,source,academyCode,withLocation,halfEnabled,voicePw,onClose,onSaved}:{studentName:string,source:"bias"|"external",academyCode:string,withLocation:boolean,halfEnabled?:boolean,voicePw?:string,onClose:()=>void,onSaved:(rec:any)=>void}){
+  const [mtype,setMtype]=useState<MType>("full");
+  const steps=swSteps(mtype);
+  const nL=lapsOf(mtype);
+  const [caps,setCaps]=useState<(number|null)[]>(Array(swSteps("full").length).fill(null));
+  const switchType=(t:MType)=>{voiceDiscard();setMtype(t);setCaps(Array(swSteps(t).length).fill(null));};
 
-  const run=async(blob:Blob,name:string)=>{
-    setBusy(true);setErr("");setText("");
-    try{ setText((await transcribeAudio(blob,name,pw))||"(알아들은 말이 없어요)"); }
-    catch(e:any){ setErr(e.message==="OPENAI_API_KEY not set"?"OpenAI 키가 아직 등록되지 않았어요 (Supabase Secrets)":"받아쓰기 실패: "+e.message); }
-    setBusy(false);
-  };
-  const start=async()=>{
-    setErr("");setText("");
+  // ── 코치 음성 녹음 → 받아쓰기 (voicePw 있을 때만) ──
+  const voiceOn=!!voicePw;
+  const [voiceWant,setVoiceWant]=useState(true);
+  const [vState,setVState]=useState<"idle"|"rec"|"busy"|"done"|"error">("idle");
+  const [vText,setVText]=useState("");
+  const [vErr,setVErr]=useState("");
+  const [vSec,setVSec]=useState(0);
+  const mrRef=useRef<any>(null);
+  const vTimer=useRef<any>(null);
+  const vBlob=useRef<{blob:Blob,name:string}|null>(null);
+  const vPromise=useRef<Promise<string|null>|null>(null);
+  const vResolve=useRef<((t:string|null)=>void)|null>(null);
+  const vDiscardFlag=useRef(false);
+
+  async function voiceTranscribe(){
+    if(!vBlob.current||!voicePw)return;
+    setVState("busy");setVErr("");
+    let text:string|null="";
+    try{
+      text=(await transcribeAudio(vBlob.current.blob,vBlob.current.name,voicePw)).trim();
+      setVText(text);setVState("done");
+    }catch(e:any){
+      setVErr(e.message==="OPENAI_API_KEY not set"?"받아쓰기 키가 등록되지 않았어요.":"받아쓰기 실패: "+e.message);
+      setVState("error");text=null;
+    }
+    vResolve.current?.(text);vResolve.current=null;
+  }
+  async function voiceStart(){
+    if(!voiceOn||!voiceWant)return;
+    voiceDiscard();
+    setVText("");setVErr("");vBlob.current=null;
     try{
       const stream=await navigator.mediaDevices.getUserMedia({audio:true});
       const mime=recMime();
@@ -252,51 +272,36 @@ function VoiceTest({pw}:{pw:string}){
       mr.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
       mr.onstop=()=>{
         stream.getTracks().forEach(t=>t.stop());
+        clearInterval(vTimer.current);
+        if(vDiscardFlag.current){vDiscardFlag.current=false;return;}
         const type=mr.mimeType||mime||"audio/webm";
-        run(new Blob(chunks,{type}),`rec.${extOf(type)}`);
+        vBlob.current={blob:new Blob(chunks,{type}),name:`coach.${extOf(type)}`};
+        voiceTranscribe();
       };
-      mr.start();recRef.current=mr;
-      setSec(0);setRecording(true);
-      timerRef.current=setInterval(()=>setSec(s=>s+1),1000);
-    }catch{ setErr("마이크를 쓸 수 없어요. 브라우저에서 마이크 권한을 허용해 주세요."); }
-  };
-  const stop=()=>{ clearInterval(timerRef.current); setRecording(false); recRef.current?.stop(); };
-  useEffect(()=>()=>{clearInterval(timerRef.current);recRef.current?.state==="recording"&&recRef.current.stop();},[]);
-
-  const btn:any={flex:1,padding:"10px 0",borderRadius:8,border:"none",fontSize:14,fontWeight:700,cursor:"pointer"};
-  return(
-    <div style={card}>
-      <div onClick={()=>setOpen(o=>!o)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
-        <span style={{fontSize:14,fontWeight:700,color:PC.text}}>🎙️ 음성 받아쓰기 시험</span>
-        <span style={{fontSize:12,color:PC.textSub}}>{open?"닫기 ▲":"열기 ▼"}</span>
-      </div>
-      {open&&(
-        <div style={{marginTop:10}}>
-          <div style={{fontSize:12,color:PC.textSub,marginBottom:8}}>코치 말을 녹음하거나 음성메모 파일을 올리면 글로 바꿔 보여줘요. 녹음 파일은 저장하지 않아요.</div>
-          <div style={{display:"flex",gap:8}}>
-            {!recording
-              ?<button disabled={busy} onClick={start} style={{...btn,background:PC.danger,color:PC.white,opacity:busy?0.5:1}}>● 녹음 시작</button>
-              :<button onClick={stop} style={{...btn,background:PC.text,color:PC.white}}>■ 멈추고 받아쓰기 ({Math.floor(sec/60)}:{String(sec%60).padStart(2,"0")})</button>}
-            <label style={{...btn,background:PC.white,color:PC.primary,border:`1px solid ${PC.primary}`,textAlign:"center",opacity:busy||recording?0.5:1,pointerEvents:busy||recording?"none":"auto"}}>
-              📁 파일 올리기
-              <input type="file" accept="audio/*,.m4a,.mp3,.wav,.webm" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];e.target.value="";if(f)run(f,f.name);}}/>
-            </label>
-          </div>
-          {busy&&<div style={{fontSize:13,color:PC.textSub,marginTop:10}}>받아쓰는 중…</div>}
-          {err&&<div style={{fontSize:13,color:PC.danger,marginTop:10}}>{err}</div>}
-          {text&&<div style={{fontSize:14,color:PC.text,marginTop:10,padding:10,background:PC.bg,borderRadius:8,whiteSpace:"pre-wrap",lineHeight:1.6}}>{text}</div>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MeasureModal({studentName,source,academyCode,withLocation,halfEnabled,onClose,onSaved}:{studentName:string,source:"bias"|"external",academyCode:string,withLocation:boolean,halfEnabled?:boolean,onClose:()=>void,onSaved:(rec:any)=>void}){
-  const [mtype,setMtype]=useState<MType>("full");
-  const steps=swSteps(mtype);
-  const nL=lapsOf(mtype);
-  const [caps,setCaps]=useState<(number|null)[]>(Array(swSteps("full").length).fill(null));
-  const switchType=(t:MType)=>{setMtype(t);setCaps(Array(swSteps(t).length).fill(null));};
+      mr.start(1000);mrRef.current=mr;
+      setVSec(0);setVState("rec");
+      vTimer.current=setInterval(()=>setVSec(x=>x+1),1000);
+    }catch{
+      setVErr("마이크를 쓸 수 없어요. 브라우저에서 마이크를 허용해 주세요. (기록 측정은 그대로 돼요)");
+      setVState("error");
+    }
+  }
+  function voiceStop():Promise<string|null>{
+    const mr=mrRef.current;
+    if(!mr||mr.state!=="recording")return vPromise.current||Promise.resolve(vText);
+    vPromise.current=new Promise<string|null>(res=>{vResolve.current=res;});
+    setVState("busy");
+    mr.stop();
+    return vPromise.current;
+  }
+  function voiceDiscard(){
+    const mr=mrRef.current;
+    if(mr&&mr.state==="recording"){vDiscardFlag.current=true;mr.stop();}
+    mrRef.current=null;clearInterval(vTimer.current);
+    vResolve.current?.("");vResolve.current=null;vPromise.current=null;
+    setVState("idle");setVText("");setVErr("");vBlob.current=null;
+  }
+  useEffect(()=>()=>{const mr=mrRef.current;if(mr&&mr.state==="recording"){vDiscardFlag.current=true;mr.stop();}clearInterval(vTimer.current);},[]);
   const [recDate,setRecDate]=useState(todayISO());
   const [locs,setLocs]=useState<string[]>([]);
   const [loc,setLoc]=useState("");
@@ -313,7 +318,8 @@ function MeasureModal({studentName,source,academyCode,withLocation,halfEnabled,o
   const capturedCount=caps.filter(v=>v!==null).length;
 
   function close(){
-    if(capturedCount>0&&!confirm("측정한 기록이 저장되지 않았어요. 닫을까요?"))return;
+    if((capturedCount>0||vState==="rec")&&!confirm("측정한 기록이 저장되지 않았어요. 닫을까요?"))return;
+    voiceDiscard();
     onClose();
   }
 
@@ -346,6 +352,10 @@ function MeasureModal({studentName,source,academyCode,withLocation,halfEnabled,o
     };
     if(withLocation&&loc)body.location=loc;
     setSaving(true);
+    let voice:string|null=vText;
+    if(vState==="rec"||vState==="busy")voice=await voiceStop();
+    if(voice===null&&!confirm("코치 음성 받아쓰기에 실패했어요. 음성 메모 없이 기록만 저장할까요?\n(취소하면 '다시 받아쓰기'를 눌러볼 수 있어요)")){setSaving(false);return;}
+    if(voice?.trim())body.coach_voice=voice.trim();
     try{
       const result=await dbPost("records",body);
       onSaved({...body,id:result?.[0]?.id||Date.now()});
@@ -379,8 +389,38 @@ function MeasureModal({studentName,source,academyCode,withLocation,halfEnabled,o
           steps={steps}
           onCapture={(idx,s)=>setCaps(p=>p.map((v,i)=>i===idx?s:v))}
           onUndo={idx=>setCaps(p=>p.map((v,i)=>i===idx?null:v))}
-          onReset={()=>setCaps(Array(steps.length).fill(null))}
+          onReset={()=>{voiceDiscard();setCaps(Array(steps.length).fill(null));}}
+          onStart={voiceStart}
         />
+        {voiceOn&&(
+          <div style={card}>
+            {vState==="idle"&&(
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:13,fontWeight:700,color:PC.text}}>🎙️ 측정하면서 코치 말 녹음</span>
+                <button onClick={()=>setVoiceWant(w=>!w)} style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,border:"none",cursor:"pointer",background:voiceWant?PC.primary:PC.borderLight,color:voiceWant?PC.white:PC.textSub}}>{voiceWant?"켜짐":"꺼짐"}</button>
+              </div>
+            )}
+            {vState==="rec"&&(
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                <span style={{fontSize:13,fontWeight:700,color:PC.danger}}>● 녹음 중 {Math.floor(vSec/60)}:{String(vSec%60).padStart(2,"0")}</span>
+                <button onClick={()=>voiceStop()} style={{fontSize:12,fontWeight:700,padding:"6px 12px",borderRadius:8,border:`1px solid ${PC.border}`,background:PC.white,color:PC.text,cursor:"pointer"}}>■ 녹음 끝내기</button>
+              </div>
+            )}
+            {vState==="busy"&&<div style={{fontSize:13,color:PC.textSub}}>🎙️ 받아쓰는 중…</div>}
+            {vState==="done"&&(
+              <div>
+                <div style={{fontSize:13,fontWeight:700,color:PC.text,marginBottom:6}}>🗣️ 코치 음성 메모 <span style={{fontWeight:400,color:PC.textSub}}>— 학생에게 보여요 · 고칠 수 있어요</span></div>
+                <textarea value={vText} onChange={e=>setVText(e.target.value)} rows={4} placeholder="(알아들은 말이 없어요)" style={{width:"100%",boxSizing:"border-box",border:`1px solid ${PC.border}`,borderRadius:8,padding:8,fontSize:14,lineHeight:1.5,color:PC.text,background:PC.white,resize:"vertical"}}/>
+              </div>
+            )}
+            {vState==="error"&&(
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                <span style={{fontSize:12,color:PC.danger}}>{vErr}</span>
+                {vBlob.current&&<button onClick={voiceTranscribe} style={{fontSize:12,fontWeight:700,padding:"6px 10px",borderRadius:8,border:`1px solid ${PC.border}`,background:PC.white,color:PC.text,cursor:"pointer",whiteSpace:"nowrap"}}>다시 받아쓰기</button>}
+              </div>
+            )}
+          </div>
+        )}
         {withLocation&&locs.length>0&&(
           <div style={card}>
             <div style={{fontSize:13,fontWeight:700,color:PC.text,marginBottom:8}}>📍 측정 장소 <span style={{fontWeight:400,color:PC.textSub}}>(선택)</span></div>
@@ -392,7 +432,7 @@ function MeasureModal({studentName,source,academyCode,withLocation,halfEnabled,o
           </div>
         )}
         <button onClick={save} disabled={saving||lapSecs[nL-1]<=0} style={{...btnPrimary,width:"100%",opacity:saving||lapSecs[nL-1]<=0?0.45:1}}>
-          {saving?"저장 중...":lapSecs[nL-1]<=0?`${nL}R까지 측정하면 저장할 수 있어요`:"기록 저장"}
+          {saving?(vState==="busy"?"받아쓰는 중...":"저장 중..."):lapSecs[nL-1]<=0?`${nL}R까지 측정하면 저장할 수 있어요`:"기록 저장"}
         </button>
       </div>
     </div>
@@ -776,6 +816,7 @@ function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated
             {RATING_KEYS.map(({key,label})=>r[key]?<span key={key} style={{fontSize:12,background:PC.borderLight,color:PC.textSub,borderRadius:20,padding:"3px 10px"}}>{label} {r[key]}/5</span>:null)}
           </div>
         )}
+        {data.coach_voice&&<div style={{fontSize:12,color:PC.text,marginTop:6,paddingTop:6,borderTop:`1px solid ${PC.borderLight}`,whiteSpace:"pre-wrap",lineHeight:1.5}}><b>🗣️ 코치 음성 메모</b>{"\n"}{data.coach_voice}</div>}
         {data.memo&&<div style={{fontSize:12,color:PC.textSub,marginTop:6,paddingTop:6,borderTop:`1px solid ${PC.borderLight}`}}>📝 {data.memo}</div>}
         {!isAdmin&&data.ratings?._by==="coach"&&!hasR&&!data.memo&&(
           <button onClick={e=>{e.stopPropagation();setRatingOpen(true);}} style={{width:"100%",marginTop:8,padding:"9px 12px",borderRadius:8,border:`1px dashed ${PC.primary}`,background:PC.primaryLight,color:PC.primaryDark,fontSize:13,fontWeight:700,cursor:"pointer"}}>📝 체감 난이도 · 느낀점 남기기</button>
@@ -1142,7 +1183,6 @@ export default function App(){
         ))}
       </div>
       <div style={{padding:"1.25rem"}}>
-        {adminTab==="records"&&<VoiceTest pw={masterPw}/>}
         {/* 통계 */}
         {adminTab!=="external"&&adminTab!=="academy"&&(
           <div style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -1389,7 +1429,7 @@ export default function App(){
                   {activeName&&STOPWATCH_ACADEMIES.includes("bias")&&(
                     <button onClick={()=>setMeasureFor(activeName)} style={{width:"100%",padding:"12px",borderRadius:10,border:"none",background:PC.primary,color:PC.white,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:10}}>⏱️ {activeName} 측정하기</button>
                   )}
-                  {measureFor&&<MeasureModal studentName={measureFor} source="bias" academyCode="bias" withLocation={false} halfEnabled={HALF_ACADEMIES.includes("bias")} onClose={()=>setMeasureFor(null)} onSaved={rec=>setAllHist(prev=>[rec,...prev])}/>}
+                  {measureFor&&<MeasureModal studentName={measureFor} source="bias" academyCode="bias" withLocation={false} halfEnabled={HALF_ACADEMIES.includes("bias")} voicePw={masterPw} onClose={()=>setMeasureFor(null)} onSaved={rec=>setAllHist(prev=>[rec,...prev])}/>}
                   {activeName&&<HistoryList records={allHist.filter(h=>h.student_name===activeName)} onUpdate={handleAllHistUpdate} isAdmin={true}/>}
                 </>
               }
