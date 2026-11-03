@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const SUPABASE_URL = "https://xivairsxhdzignniithm.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhpdmFpcnN4aGR6aWdubmlpdGhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0ODE0MzYsImV4cCI6MjA5NjA1NzQzNn0.C6oVIr2LVd_M3-O4tXeTis50ZA_sQ1UR5VpLQ90nrUk";
@@ -203,6 +203,88 @@ function Stopwatch({steps,onCapture,onUndo,onReset}:{steps:SwStep[],onCapture:(i
           {caps.map((ms,i)=>(
             <span key={i} style={{fontSize:11,background:PC.borderLight,color:PC.textSub,borderRadius:20,padding:"3px 9px"}}>{steps[i].label} {swFmt(ms)}</span>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── 음성 받아쓰기 (OpenAI, Supabase 함수 transcribe 경유) ── */
+async function transcribeAudio(blob:Blob,fileName:string,pw:string):Promise<string>{
+  const fd=new FormData();
+  fd.append("pw",pw);
+  fd.append("file",blob,fileName);
+  const r=await fetch(`${SUPABASE_URL}/functions/v1/transcribe`,{method:"POST",headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`},body:fd});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(j.error||`HTTP ${r.status}`);
+  return j.text||"";
+}
+const recMime=()=>{
+  const MR:any=(window as any).MediaRecorder;
+  if(!MR)return "";
+  return ["audio/webm","audio/mp4","audio/ogg"].find(t=>MR.isTypeSupported?.(t))||"";
+};
+const extOf=(mime:string)=>mime.includes("mp4")?"m4a":mime.includes("ogg")?"ogg":"webm";
+
+function VoiceTest({pw}:{pw:string}){
+  const [open,setOpen]=useState(false);
+  const [recording,setRecording]=useState(false);
+  const [sec,setSec]=useState(0);
+  const [busy,setBusy]=useState(false);
+  const [text,setText]=useState("");
+  const [err,setErr]=useState("");
+  const recRef=useRef<any>(null);
+  const timerRef=useRef<any>(null);
+
+  const run=async(blob:Blob,name:string)=>{
+    setBusy(true);setErr("");setText("");
+    try{ setText((await transcribeAudio(blob,name,pw))||"(알아들은 말이 없어요)"); }
+    catch(e:any){ setErr(e.message==="OPENAI_API_KEY not set"?"OpenAI 키가 아직 등록되지 않았어요 (Supabase Secrets)":"받아쓰기 실패: "+e.message); }
+    setBusy(false);
+  };
+  const start=async()=>{
+    setErr("");setText("");
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      const mime=recMime();
+      const mr=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);
+      const chunks:Blob[]=[];
+      mr.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
+      mr.onstop=()=>{
+        stream.getTracks().forEach(t=>t.stop());
+        const type=mr.mimeType||mime||"audio/webm";
+        run(new Blob(chunks,{type}),`rec.${extOf(type)}`);
+      };
+      mr.start();recRef.current=mr;
+      setSec(0);setRecording(true);
+      timerRef.current=setInterval(()=>setSec(s=>s+1),1000);
+    }catch{ setErr("마이크를 쓸 수 없어요. 브라우저에서 마이크 권한을 허용해 주세요."); }
+  };
+  const stop=()=>{ clearInterval(timerRef.current); setRecording(false); recRef.current?.stop(); };
+  useEffect(()=>()=>{clearInterval(timerRef.current);recRef.current?.state==="recording"&&recRef.current.stop();},[]);
+
+  const btn:any={flex:1,padding:"10px 0",borderRadius:8,border:"none",fontSize:14,fontWeight:700,cursor:"pointer"};
+  return(
+    <div style={card}>
+      <div onClick={()=>setOpen(o=>!o)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
+        <span style={{fontSize:14,fontWeight:700,color:PC.text}}>🎙️ 음성 받아쓰기 시험</span>
+        <span style={{fontSize:12,color:PC.textSub}}>{open?"닫기 ▲":"열기 ▼"}</span>
+      </div>
+      {open&&(
+        <div style={{marginTop:10}}>
+          <div style={{fontSize:12,color:PC.textSub,marginBottom:8}}>코치 말을 녹음하거나 음성메모 파일을 올리면 글로 바꿔 보여줘요. 녹음 파일은 저장하지 않아요.</div>
+          <div style={{display:"flex",gap:8}}>
+            {!recording
+              ?<button disabled={busy} onClick={start} style={{...btn,background:PC.danger,color:PC.white,opacity:busy?0.5:1}}>● 녹음 시작</button>
+              :<button onClick={stop} style={{...btn,background:PC.text,color:PC.white}}>■ 멈추고 받아쓰기 ({Math.floor(sec/60)}:{String(sec%60).padStart(2,"0")})</button>}
+            <label style={{...btn,background:PC.white,color:PC.primary,border:`1px solid ${PC.primary}`,textAlign:"center",opacity:busy||recording?0.5:1,pointerEvents:busy||recording?"none":"auto"}}>
+              📁 파일 올리기
+              <input type="file" accept="audio/*,.m4a,.mp3,.wav,.webm" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];e.target.value="";if(f)run(f,f.name);}}/>
+            </label>
+          </div>
+          {busy&&<div style={{fontSize:13,color:PC.textSub,marginTop:10}}>받아쓰는 중…</div>}
+          {err&&<div style={{fontSize:13,color:PC.danger,marginTop:10}}>{err}</div>}
+          {text&&<div style={{fontSize:14,color:PC.text,marginTop:10,padding:10,background:PC.bg,borderRadius:8,whiteSpace:"pre-wrap",lineHeight:1.6}}>{text}</div>}
         </div>
       )}
     </div>
@@ -1060,6 +1142,7 @@ export default function App(){
         ))}
       </div>
       <div style={{padding:"1.25rem"}}>
+        {adminTab==="records"&&<VoiceTest pw={masterPw}/>}
         {/* 통계 */}
         {adminTab!=="external"&&adminTab!=="academy"&&(
           <div style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
