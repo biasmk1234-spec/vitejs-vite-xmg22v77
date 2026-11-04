@@ -225,6 +225,23 @@ const recMime=()=>{
   return ["audio/webm","audio/mp4","audio/ogg"].find(t=>MR.isTypeSupported?.(t))||"";
 };
 const extOf=(mime:string)=>mime.includes("mp4")?"m4a":mime.includes("ogg")?"ogg":"webm";
+// 말이 없는 구간에서 흔히 나오는 헛소리(외국 문자·인사말)는 버림
+const VOICE_JUNK=[/시청해\s*주셔서\s*감사합니다/,/구독(과|하고)?\s*좋아요/,/^감사합니다[.!]?$/,/MBC\s*뉴스/];
+const cleanVoice=(t:string)=>{const v=(t||"").trim();if(!/[가-힣A-Za-z0-9]/.test(v))return "";if(VOICE_JUNK.some(r=>r.test(v)))return "";return v;};
+// "[1R] 내용" 줄을 구간 이름표 + 내용으로 보여줌 (이름표 없는 예전 메모도 그대로 표시)
+function VoiceMemoView({text}:{text:string}){
+  const lines=text.split("\n").map(l=>l.trim()).filter(Boolean);
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:4}}>
+      {lines.map((l,i)=>{const m=l.match(/^\[([^\]]+)\]\s*(.*)$/);return(
+        <div key={i} style={{display:"flex",gap:6,alignItems:"flex-start",fontSize:12,lineHeight:1.5}}>
+          {m&&<span style={{flexShrink:0,fontSize:11,fontWeight:700,background:PC.primaryLight,color:PC.primaryDark,borderRadius:6,padding:"1px 7px"}}>{m[1]}</span>}
+          <span style={{color:PC.text,whiteSpace:"pre-wrap"}}>{m?m[2]:l}</span>
+        </div>
+      );})}
+    </div>
+  );
+}
 
 function MeasureModal({studentName,source,academyCode,withLocation,halfEnabled,voicePw,onClose,onSaved}:{studentName:string,source:"bias"|"external",academyCode:string,withLocation:boolean,halfEnabled?:boolean,voicePw?:string,onClose:()=>void,onSaved:(rec:any)=>void}){
   const [mtype,setMtype]=useState<MType>("full");
@@ -233,75 +250,147 @@ function MeasureModal({studentName,source,academyCode,withLocation,halfEnabled,v
   const [caps,setCaps]=useState<(number|null)[]>(Array(swSteps("full").length).fill(null));
   const switchType=(t:MType)=>{voiceDiscard();setMtype(t);setCaps(Array(swSteps(t).length).fill(null));};
 
-  // ── 코치 음성 녹음 → 받아쓰기 (voicePw 있을 때만) ──
+  // ── 코치 음성 녹음 → 구간별 받아쓰기 (voicePw 있을 때만) ──
+  // 스톱워치에서 바퀴(1R…)·코스 OUT을 누를 때마다 녹음을 끊어, 구간마다 따로 받아씀.
+  // 결과 형식: "[1R] 내용\n[장대허들] 내용 ..." (records.coach_voice 한 칸에 저장)
+  type VPart={blob:Blob,name:string,text:string|null,err:boolean,p:Promise<void>};
+  type VSeg={idx:number,label:string,parts:VPart[],merged:VSeg[],ready:Promise<void>,settled:boolean};
   const voiceOn=!!voicePw;
   const [voiceWant,setVoiceWant]=useState(true);
-  const [vState,setVState]=useState<"idle"|"rec"|"busy"|"done"|"error">("idle");
+  const [vState,setVState]=useState<"idle"|"nomic"|"rec"|"busy"|"done"|"error">("idle");
   const [vText,setVText]=useState("");
   const [vErr,setVErr]=useState("");
   const [vSec,setVSec]=useState(0);
+  const [vLive,setVLive]=useState<{label:string,text:string|null,err:boolean}[]>([]);
+  const streamRef=useRef<MediaStream|null>(null);
   const mrRef=useRef<any>(null);
   const vTimer=useRef<any>(null);
-  const vBlob=useRef<{blob:Blob,name:string}|null>(null);
-  const vPromise=useRef<Promise<string|null>|null>(null);
-  const vResolve=useRef<((t:string|null)=>void)|null>(null);
-  const vDiscardFlag=useRef(false);
+  const segsRef=useRef<VSeg[]>([]);
+  const carryRef=useRef<VSeg[]>([]);
+  const stopRef=useRef<Promise<string|null>|null>(null);
+  const vGen=useRef(0); // 녹음을 버릴 때마다 증가 → 이전 녹음의 늦은 결과는 무시
 
-  async function voiceTranscribe(){
-    if(!vBlob.current||!voicePw)return;
-    setVState("busy");setVErr("");
-    let text:string|null="";
-    try{
-      text=(await transcribeAudio(vBlob.current.blob,vBlob.current.name,voicePw)).trim();
-      setVText(text);setVState("done");
-    }catch(e:any){
-      setVErr(e.message==="OPENAI_API_KEY not set"?"받아쓰기 키가 등록되지 않았어요.":"받아쓰기 실패: "+e.message);
-      setVState("error");text=null;
-    }
-    vResolve.current?.(text);vResolve.current=null;
+  const isSplit=(st:SwStep)=>st.kind==="lap"||st.kind==="out";
+  const segLabelOf=(st:SwStep)=>st.kind==="lap"?`${(st.lap??0)+1}R`:(INOUT_COURSES.find(c=>c.id===st.course)?.name||"");
+  const allParts=(sg:VSeg):VPart[]=>[...sg.merged.flatMap(allParts),...sg.parts];
+  const segSettled=(sg:VSeg):boolean=>sg.settled&&sg.merged.every(segSettled);
+  const awaitSeg=async(sg:VSeg):Promise<void>=>{await sg.ready;await Promise.all(sg.merged.map(awaitSeg));await Promise.all(sg.parts.map(x=>x.p));};
+  const segText=(sg:VSeg)=>allParts(sg).map(x=>x.text||"").filter(Boolean).join(" ");
+  const buildText=()=>segsRef.current.map(sg=>{const t=segText(sg);return t?`[${sg.label}] ${t}`:"";}).filter(Boolean).join("\n");
+  const anyErr=()=>segsRef.current.some(sg=>allParts(sg).some(x=>x.err));
+
+  function refreshLive(){
+    setVLive(segsRef.current.map(sg=>{
+      const ps=allParts(sg);
+      const pending=!segSettled(sg)||ps.some(x=>x.text===null&&!x.err);
+      return {label:sg.label,text:pending?null:segText(sg),err:ps.some(x=>x.err)};
+    }));
+  }
+  function transcribePart(part:VPart,gen:number){
+    part.err=false;part.text=null;
+    part.p=transcribeAudio(part.blob,part.name,voicePw!)
+      .then(t=>{part.text=cleanVoice(t);},()=>{part.err=true;})
+      .then(()=>{if(gen===vGen.current)refreshLive();});
+    return part.p;
+  }
+  function startRecorder(){
+    const stream=streamRef.current;if(!stream)return;
+    const mime=recMime();
+    const mr:any=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);
+    mr._chunks=[] as Blob[];mr._mime=mime;
+    mr.ondataavailable=(e:any)=>{if(e.data.size)mr._chunks.push(e.data);};
+    mr.start(1000);mrRef.current=mr;
+  }
+  // 지금 녹음기를 멈추고 그 소리를 받아쓰기 시작. next=true면 다음 구간 녹음을 바로 이어서 시작.
+  function cutRecorder(next:boolean):Promise<VPart|null>{
+    const mr=mrRef.current;const gen=vGen.current;
+    if(!mr||mr.state!=="recording")return Promise.resolve(null);
+    const done=new Promise<VPart|null>(res=>{
+      mr.onstop=()=>{
+        if(gen!==vGen.current||!mr._chunks.length){res(null);return;}
+        const type=mr.mimeType||mr._mime||"audio/webm";
+        const part:VPart={blob:new Blob(mr._chunks,{type}),name:`coach.${extOf(type)}`,text:null,err:false,p:Promise.resolve()};
+        transcribePart(part,gen);
+        res(part);
+      };
+    });
+    mr.stop();
+    if(next)startRecorder();else mrRef.current=null;
+    return done;
+  }
+  function closeSeg(idx:number,label:string,next:boolean){
+    const sg:VSeg={idx,label,parts:[],merged:carryRef.current,ready:Promise.resolve(),settled:false};
+    carryRef.current=[];
+    segsRef.current.push(sg);
+    sg.ready=cutRecorder(next).then(part=>{if(part)sg.parts.push(part);sg.settled=true;refreshLive();});
+    refreshLive();
+  }
+  function voiceOnCapture(idx:number){
+    const st=steps[idx];
+    if(!mrRef.current||!st||!isSplit(st))return;
+    closeSeg(idx,segLabelOf(st),true);
+  }
+  function voiceOnUndo(idx:number){
+    const i=segsRef.current.findIndex(sg=>sg.idx===idx);
+    if(i<0||!mrRef.current)return;
+    const [sg]=segsRef.current.splice(i,1);
+    carryRef.current.push(sg); // 취소된 구간 소리는 다음 구간에 합침
+    refreshLive();
   }
   async function voiceStart(){
     if(!voiceOn||!voiceWant)return;
     voiceDiscard();
-    setVText("");setVErr("");vBlob.current=null;
+    const gen=vGen.current;
     try{
       const stream=await navigator.mediaDevices.getUserMedia({audio:true});
-      const mime=recMime();
-      const mr=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);
-      const chunks:Blob[]=[];
-      mr.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
-      mr.onstop=()=>{
-        stream.getTracks().forEach(t=>t.stop());
-        clearInterval(vTimer.current);
-        if(vDiscardFlag.current){vDiscardFlag.current=false;return;}
-        const type=mr.mimeType||mime||"audio/webm";
-        vBlob.current={blob:new Blob(chunks,{type}),name:`coach.${extOf(type)}`};
-        voiceTranscribe();
-      };
-      mr.start(1000);mrRef.current=mr;
+      if(gen!==vGen.current){stream.getTracks().forEach(t=>t.stop());return;}
+      streamRef.current=stream;startRecorder();
       setVSec(0);setVState("rec");
       vTimer.current=setInterval(()=>setVSec(x=>x+1),1000);
     }catch{
       setVErr("마이크를 쓸 수 없어요. 브라우저에서 마이크를 허용해 주세요. (기록 측정은 그대로 돼요)");
-      setVState("error");
+      setVState("nomic");
     }
   }
+  function finish(gen:number):Promise<string|null>{
+    return (async()=>{
+      await Promise.all(segsRef.current.map(awaitSeg));
+      if(gen!==vGen.current)return "";
+      const text=buildText();
+      setVText(text);
+      if(anyErr()){setVErr("일부 구간 받아쓰기에 실패했어요.");setVState("error");return null;}
+      setVState("done");return text;
+    })();
+  }
   function voiceStop():Promise<string|null>{
-    const mr=mrRef.current;
-    if(!mr||mr.state!=="recording")return vPromise.current||Promise.resolve(vText);
-    vPromise.current=new Promise<string|null>(res=>{vResolve.current=res;});
+    if(stopRef.current)return stopRef.current;
+    const gen=vGen.current;
+    if(mrRef.current){
+      const n=caps.filter(v=>v!==null).length;
+      const st=steps.slice(n).find(isSplit);
+      closeSeg(-1,st?segLabelOf(st):"측정 후",false);
+    }
+    clearInterval(vTimer.current);
     setVState("busy");
-    mr.stop();
-    return vPromise.current;
+    stopRef.current=finish(gen).finally(()=>{streamRef.current?.getTracks().forEach(t=>t.stop());streamRef.current=null;});
+    return stopRef.current;
+  }
+  function voiceRetry(){
+    const gen=vGen.current;
+    segsRef.current.forEach(sg=>allParts(sg).forEach(x=>{if(x.err)transcribePart(x,gen);}));
+    setVState("busy");refreshLive();
+    stopRef.current=finish(gen);
   }
   function voiceDiscard(){
-    const mr=mrRef.current;
-    if(mr&&mr.state==="recording"){vDiscardFlag.current=true;mr.stop();}
-    mrRef.current=null;clearInterval(vTimer.current);
-    vResolve.current?.("");vResolve.current=null;vPromise.current=null;
-    setVState("idle");setVText("");setVErr("");vBlob.current=null;
+    vGen.current++;
+    const mr=mrRef.current;mrRef.current=null;
+    if(mr&&mr.state==="recording"){mr.onstop=null;mr.stop();}
+    streamRef.current?.getTracks().forEach(t=>t.stop());streamRef.current=null;
+    clearInterval(vTimer.current);
+    segsRef.current=[];carryRef.current=[];stopRef.current=null;
+    setVState("idle");setVText("");setVErr("");setVLive([]);
   }
-  useEffect(()=>()=>{const mr=mrRef.current;if(mr&&mr.state==="recording"){vDiscardFlag.current=true;mr.stop();}clearInterval(vTimer.current);},[]);
+  useEffect(()=>()=>{vGen.current++;const mr=mrRef.current;if(mr&&mr.state==="recording"){mr.onstop=null;mr.stop();}streamRef.current?.getTracks().forEach(t=>t.stop());clearInterval(vTimer.current);},[]);
   const [recDate,setRecDate]=useState(todayISO());
   const [locs,setLocs]=useState<string[]>([]);
   const [loc,setLoc]=useState("");
@@ -353,8 +442,11 @@ function MeasureModal({studentName,source,academyCode,withLocation,halfEnabled,v
     if(withLocation&&loc)body.location=loc;
     setSaving(true);
     let voice:string|null=vText;
-    if(vState==="rec"||vState==="busy")voice=await voiceStop();
-    if(voice===null&&!confirm("코치 음성 받아쓰기에 실패했어요. 음성 메모 없이 기록만 저장할까요?\n(취소하면 '다시 받아쓰기'를 눌러볼 수 있어요)")){setSaving(false);return;}
+    const failMsg="코치 음성 중 일부 구간 받아쓰기에 실패했어요. 받아쓴 부분만 저장할까요?\n(취소하면 '다시 받아쓰기'를 눌러볼 수 있어요)";
+    if(vState==="rec"||vState==="busy"){
+      voice=await voiceStop();
+      if(voice===null){if(!confirm(failMsg)){setSaving(false);return;}voice=buildText();}
+    }else if(vState==="error"&&!confirm(failMsg)){setSaving(false);return;}
     if(voice?.trim())body.coach_voice=voice.trim();
     try{
       const result=await dbPost("records",body);
@@ -387,8 +479,8 @@ function MeasureModal({studentName,source,academyCode,withLocation,halfEnabled,v
         <Stopwatch
           key={mtype}
           steps={steps}
-          onCapture={(idx,s)=>setCaps(p=>p.map((v,i)=>i===idx?s:v))}
-          onUndo={idx=>setCaps(p=>p.map((v,i)=>i===idx?null:v))}
+          onCapture={(idx,s)=>{setCaps(p=>p.map((v,i)=>i===idx?s:v));voiceOnCapture(idx);}}
+          onUndo={idx=>{setCaps(p=>p.map((v,i)=>i===idx?null:v));voiceOnUndo(idx);}}
           onReset={()=>{voiceDiscard();setCaps(Array(steps.length).fill(null));}}
           onStart={voiceStart}
         />
@@ -396,27 +488,39 @@ function MeasureModal({studentName,source,academyCode,withLocation,halfEnabled,v
           <div style={card}>
             {vState==="idle"&&(
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span style={{fontSize:13,fontWeight:700,color:PC.text}}>🎙️ 측정하면서 코치 말 녹음</span>
+                <span style={{fontSize:13,fontWeight:700,color:PC.text}}>🎙️ 측정하면서 코치 말 녹음 <span style={{fontWeight:400,color:PC.textSub}}>(구간별)</span></span>
                 <button onClick={()=>setVoiceWant(w=>!w)} style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,border:"none",cursor:"pointer",background:voiceWant?PC.primary:PC.borderLight,color:voiceWant?PC.white:PC.textSub}}>{voiceWant?"켜짐":"꺼짐"}</button>
               </div>
             )}
+            {vState==="nomic"&&<div style={{fontSize:12,color:PC.danger}}>{vErr}</div>}
             {vState==="rec"&&(
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
                 <span style={{fontSize:13,fontWeight:700,color:PC.danger}}>● 녹음 중 {Math.floor(vSec/60)}:{String(vSec%60).padStart(2,"0")}</span>
                 <button onClick={()=>voiceStop()} style={{fontSize:12,fontWeight:700,padding:"6px 12px",borderRadius:8,border:`1px solid ${PC.border}`,background:PC.white,color:PC.text,cursor:"pointer"}}>■ 녹음 끝내기</button>
               </div>
             )}
-            {vState==="busy"&&<div style={{fontSize:13,color:PC.textSub}}>🎙️ 받아쓰는 중…</div>}
-            {vState==="done"&&(
-              <div>
-                <div style={{fontSize:13,fontWeight:700,color:PC.text,marginBottom:6}}>🗣️ 코치 음성 메모 <span style={{fontWeight:400,color:PC.textSub}}>— 학생에게 보여요 · 고칠 수 있어요</span></div>
-                <textarea value={vText} onChange={e=>setVText(e.target.value)} rows={4} placeholder="(알아들은 말이 없어요)" style={{width:"100%",boxSizing:"border-box",border:`1px solid ${PC.border}`,borderRadius:8,padding:8,fontSize:14,lineHeight:1.5,color:PC.text,background:PC.white,resize:"vertical"}}/>
+            {vState==="busy"&&<div style={{fontSize:13,color:PC.textSub}}>🎙️ 남은 구간 받아쓰는 중…</div>}
+            {(vState==="rec"||vState==="busy")&&vLive.length>0&&(
+              <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:8}}>
+                {vLive.map((sg,i)=>(
+                  <div key={i} style={{display:"flex",gap:6,alignItems:"flex-start",fontSize:12,lineHeight:1.5}}>
+                    <span style={{flexShrink:0,fontSize:11,fontWeight:700,background:PC.primaryLight,color:PC.primaryDark,borderRadius:6,padding:"1px 7px"}}>{sg.label}</span>
+                    <span style={{color:sg.err?PC.danger:sg.text===null?PC.textLight:sg.text?PC.text:PC.textLight}}>{sg.err?"받아쓰기 실패":sg.text===null?"받아쓰는 중…":(sg.text||"(말 없음)")}</span>
+                  </div>
+                ))}
               </div>
             )}
-            {vState==="error"&&(
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
-                <span style={{fontSize:12,color:PC.danger}}>{vErr}</span>
-                {vBlob.current&&<button onClick={voiceTranscribe} style={{fontSize:12,fontWeight:700,padding:"6px 10px",borderRadius:8,border:`1px solid ${PC.border}`,background:PC.white,color:PC.text,cursor:"pointer",whiteSpace:"nowrap"}}>다시 받아쓰기</button>}
+            {(vState==="done"||vState==="error")&&(
+              <div>
+                {vState==="error"&&(
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:6}}>
+                    <span style={{fontSize:12,color:PC.danger}}>{vErr}</span>
+                    <button onClick={voiceRetry} style={{fontSize:12,fontWeight:700,padding:"6px 10px",borderRadius:8,border:`1px solid ${PC.border}`,background:PC.white,color:PC.text,cursor:"pointer",whiteSpace:"nowrap"}}>다시 받아쓰기</button>
+                  </div>
+                )}
+                <div style={{fontSize:13,fontWeight:700,color:PC.text,marginBottom:6}}>🗣️ 코치 음성 메모 <span style={{fontWeight:400,color:PC.textSub}}>— 학생에게 보여요 · 고칠 수 있어요</span></div>
+                <textarea value={vText} onChange={e=>setVText(e.target.value)} rows={Math.min(10,Math.max(4,vText.split("\n").length+1))} placeholder="(알아들은 말이 없어요)" style={{width:"100%",boxSizing:"border-box",border:`1px solid ${PC.border}`,borderRadius:8,padding:8,fontSize:14,lineHeight:1.5,color:PC.text,background:PC.white,resize:"vertical"}}/>
+                <div style={{fontSize:11,color:PC.textLight,marginTop:4}}>[1R] 같은 구간 이름표는 그대로 두고 내용만 고치세요.</div>
               </div>
             )}
           </div>
@@ -747,14 +851,14 @@ function CoachVoiceBox({data,onSave}:{data:any,onSave:(updated:any)=>void}){
       {!open?(
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           {data.coach_voice
-            ?<span style={{fontSize:12,color:PC.text,flex:1,whiteSpace:"pre-wrap",lineHeight:1.5}}><b>🗣️ 코치 음성 메모</b>{"\n"}{data.coach_voice}</span>
+            ?<div style={{flex:1,textAlign:"left"}}><b style={{fontSize:12,color:PC.text}}>🗣️ 코치 음성 메모</b><VoiceMemoView text={data.coach_voice}/></div>
             :<span style={{fontSize:12,color:PC.textLight,flex:1}}>🗣️ 코치 음성 메모 없음</span>}
           <button onClick={()=>{setText(data.coach_voice||"");setOpen(true);}} style={{background:PC.primaryLight,border:"none",borderRadius:8,padding:"4px 10px",fontSize:12,color:PC.primaryDark,cursor:"pointer",fontWeight:600,marginLeft:8,whiteSpace:"nowrap"}}>{data.coach_voice?"✏️ 수정":"+ 추가"}</button>
         </div>
       ):(
         <div>
           <div style={{fontSize:12,fontWeight:700,color:PC.text,marginBottom:4}}>🗣️ 코치 음성 메모 <span style={{fontWeight:400,color:PC.textSub}}>(비우고 저장하면 삭제)</span></div>
-          <textarea rows={3} value={text} onChange={e=>setText(e.target.value)} placeholder="코치 음성 메모" style={{...inSt,fontSize:13,resize:"vertical" as const,marginBottom:6}}/>
+          <textarea rows={Math.min(10,Math.max(3,text.split("\n").length+1))} value={text} onChange={e=>setText(e.target.value)} placeholder="코치 음성 메모" style={{...inSt,fontSize:13,resize:"vertical" as const,marginBottom:6}}/>
           <div style={{display:"flex",gap:6}}>
             <button onClick={()=>setOpen(false)} style={{flex:1,padding:"7px",borderRadius:8,border:`1px solid ${PC.border}`,background:PC.white,color:PC.textSub,fontSize:13,cursor:"pointer"}}>취소</button>
             <button onClick={save} disabled={saving} style={{flex:2,padding:"7px",borderRadius:8,border:"none",background:PC.primary,color:PC.white,fontSize:13,fontWeight:700,cursor:"pointer"}}>{saving?"저장 중...":"저장"}</button>
@@ -855,7 +959,7 @@ function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated
           </div>
         )}
         {isAdmin&&(data.coach_voice||data.ratings?._by==="coach")&&<CoachVoiceBox data={data} onSave={d=>{setData(d);onUpdate&&onUpdate(d);}}/>}
-        {!isAdmin&&data.coach_voice&&<div style={{fontSize:12,color:PC.text,marginTop:6,paddingTop:6,borderTop:`1px solid ${PC.borderLight}`,whiteSpace:"pre-wrap",lineHeight:1.5}}><b>🗣️ 코치 음성 메모</b>{"\n"}{data.coach_voice}</div>}
+        {!isAdmin&&data.coach_voice&&<div style={{marginTop:6,paddingTop:6,borderTop:`1px solid ${PC.borderLight}`,textAlign:"left"}}><b style={{fontSize:12,color:PC.text}}>🗣️ 코치 음성 메모</b><VoiceMemoView text={data.coach_voice}/></div>}
         {data.memo&&<div style={{fontSize:12,color:PC.textSub,marginTop:6,paddingTop:6,borderTop:`1px solid ${PC.borderLight}`}}>📝 {data.memo}</div>}
         {!isAdmin&&data.ratings?._by==="coach"&&!hasR&&!data.memo&&(
           <button onClick={e=>{e.stopPropagation();setRatingOpen(true);}} style={{width:"100%",marginTop:8,padding:"9px 12px",borderRadius:8,border:`1px dashed ${PC.primary}`,background:PC.primaryLight,color:PC.primaryDark,fontSize:13,fontWeight:700,cursor:"pointer"}}>📝 체감 난이도 · 느낀점 남기기</button>
