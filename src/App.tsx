@@ -869,6 +869,262 @@ function CoachVoiceBox({data,onSave}:{data:any,onSave:(updated:any)=>void}){
   );
 }
 
+// ── 심박 (시계 앱 심박 캡처 → 1초 단위 심박, 구간별 그래프) ──
+// 저장 형식 records.hr = {v:1, bpm:[시계 시간 0초부터 1초 단위], off:스톱워치 0초일 때의 시계 시간(초), avg, max, dur}
+// 역치는 캡처 속 시계 영역(시계 주인 기준)이 아니라 이번 측정 최고 심박의 90%로 추정
+let HR_PW="";
+const HR_THR_PCT=0.9;
+type HrData={v:1,bpm:number[],off:number,avg:number,max:number,dur:number};
+type HrSeg={label:string,short:string,a:number,b:number,kind:"lap"|"course"|"move"};
+const HR_SHORT:Record<string,string>={hurdle:"허들",resistance:"밀당",rescue:"구조",trigger:"방아쇠"};
+const fmtMS=(s:number)=>{const n=Math.round(Math.abs(s));return `${s<0?"-":""}${Math.floor(n/60)}:${pad(n%60)}`;};
+const parseMS=(t:string)=>{const m=(t||"").trim().match(/^(\d{1,2}):(\d{2})$/);return m?Number(m[1])*60+Number(m[2]):NaN;};
+
+async function hrReadNumbers(file:File,pw:string):Promise<{avg:number|null,max:number|null,end:string|null}>{
+  const fd=new FormData(); fd.append("pw",pw); fd.append("file",file,file.name||"hr.png");
+  const r=await fetch(`${SUPABASE_URL}/functions/v1/hrread`,{method:"POST",headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`},body:fd});
+  const j=await r.json().catch(()=>({})); if(!r.ok)throw new Error(j.error||`HTTP ${r.status}`); return j;
+}
+async function hrLoadImage(file:File):Promise<ImageData>{
+  const url=URL.createObjectURL(file);
+  try{
+    const img=new Image();
+    await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src=url;});
+    const c=document.createElement("canvas"); c.width=img.naturalWidth; c.height=img.naturalHeight;
+    const ctx=c.getContext("2d")!; ctx.drawImage(img,0,0);
+    return ctx.getImageData(0,0,c.width,c.height);
+  }finally{URL.revokeObjectURL(url);}
+}
+// 분홍 칠이 넓게 깔린 줄 묶음 = 심박 그래프 영역 → 그 안에서 열마다 가장 위 빨간 점 = 심박 선
+function hrTrace(img:ImageData):{xs:number[],ys:number[]}|null{
+  const {width:W,height:H,data:d}=img;
+  const isRed=(i:number)=>d[i]>190&&d[i+1]<150&&d[i+2]<150&&d[i]-d[i+1]>70;
+  const isPink=(i:number)=>d[i]>220&&d[i+1]>=120&&d[i+1]<=232&&d[i+2]>=120&&d[i+2]<=235&&d[i]-d[i+1]>=18;
+  let best:[number,number]|null=null,cur:[number,number]|null=null;
+  const longer=(a:[number,number]|null,b:[number,number]|null)=>!a?b:!b?a:(a[1]-a[0]>=b[1]-b[0]?a:b);
+  for(let y=0;y<H;y++){
+    let c=0; for(let x=0;x<W;x+=2)if(isPink((y*W+x)*4))c++;
+    if(c>W*0.025){cur=cur?[cur[0],y]:[y,y];}
+    else{best=longer(best,cur);cur=null;}
+  }
+  best=longer(best,cur);
+  if(!best||best[1]-best[0]<H*0.03)return null;
+  const y0=Math.max(0,best[0]-Math.round((best[1]-best[0])*0.6)),y1=best[1];
+  const tops:number[]=Array(W).fill(-1);
+  for(let x=0;x<W;x++)for(let y=y0;y<=y1;y++)if(isRed((y*W+x)*4)){tops[x]=y;break;}
+  let bs=-1,bl=0,s=-1,last=-10;
+  for(let x=0;x<W;x++){
+    if(tops[x]<0)continue;
+    if(x-last>3)s=x;
+    last=x;
+    if(x-s+1>bl){bl=x-s+1;bs=s;}
+  }
+  if(bl<W*0.3)return null;
+  const xs:number[]=[],ys:number[]=[];
+  for(let x=bs;x<bs+bl;x++)if(tops[x]>=0){xs.push(x);ys.push(tops[x]);}
+  return {xs,ys};
+}
+// 최대(가장 위 점)와 평균(선의 평균 높이) 두 값으로 높이→심박 환산, 가로는 0초~그래프 끝 시간
+function hrSeries(t:{xs:number[],ys:number[]},avg:number,max:number,dur:number):number[]{
+  const ymin=Math.min(...t.ys); const ybar=t.ys.reduce((a,b)=>a+b,0)/t.ys.length;
+  const B=ybar>ymin?(max-avg)/(ybar-ymin):0; const A=max+B*ymin;
+  const x0=t.xs[0],x1=t.xs[t.xs.length-1]; const out:number[]=[]; let j=0;
+  for(let s=0;s<=dur;s++){
+    const fx=x0+(x1-x0)*s/dur;
+    while(j<t.xs.length-1&&t.xs[j+1]<=fx)j++;
+    const k=j<t.xs.length-1&&Math.abs(t.xs[j+1]-fx)<Math.abs(t.xs[j]-fx)?j+1:j;
+    out.push(Math.round(A-B*t.ys[k]));
+  }
+  return out;
+}
+// 심박이 10초 사이 15 이상 오르기 시작하는 지점 = 출발 (기록 길이를 넘지 않게)
+function hrAutoOff(bpm:number[],total:number){
+  let t=bpm.findIndex((v,i)=>i+10<bpm.length&&bpm[i+10]-v>=15);
+  if(t<0)t=0;
+  return Math.max(0,Math.min(t,bpm.length-1-Math.ceil(total)));
+}
+function hrSegs(h:any):HrSeg[]{
+  const segs:HrSeg[]=[]; let p=0;
+  (h.obstacle_laps||[]).forEach((v:number,i:number)=>{if(v>p){segs.push({label:`${i+1}R`,short:`${i+1}R`,a:p,b:v,kind:"lap"});p=v;}});
+  INOUT_COURSES.forEach(c=>{
+    const d=h.inout_times?.[c.id];
+    if(!d||typeof d!=="object"||!(d.out>d.in)||d.in<p-0.5)return;
+    if(d.in>p+0.5)segs.push({label:"이동",short:"",a:p,b:d.in,kind:"move"});
+    segs.push({label:c.name,short:HR_SHORT[c.id],a:d.in,b:d.out,kind:"course"}); p=d.out;
+  });
+  return segs;
+}
+function hrAnalyze(hr:HrData,h:any){
+  const total=Number(h.total_sec||h.total_time||0);
+  const at=(rt:number)=>{const i=Math.round(hr.off+rt);return i>=0&&i<hr.bpm.length?hr.bpm[i]:null;};
+  const segs=hrSegs(h);
+  const segOf=(rt:number)=>segs.find(s=>rt>=s.a&&rt<s.b)?.label||(rt>=total?"완주 후":"");
+  let peak=0; for(let rt=0;rt<=total+30;rt++){const v=at(rt);if(v!==null&&v>peak)peak=v;}
+  const thr=Math.round(peak*HR_THR_PCT);
+  const start=at(0);
+  let firstUp:number|null=null,above=0,covered=0;
+  const drops:{a:number,b:number,min:number}[]=[]; let dA:number|null=null,dMin=999;
+  for(let rt=0;rt<=Math.floor(total);rt++){
+    const v=at(rt); if(v===null)continue; covered++;
+    if(v>=thr){above++; if(firstUp===null)firstUp=rt;}
+    if(firstUp!==null&&v<thr){if(dA===null){dA=rt;dMin=v;}else dMin=Math.min(dMin,v);}
+    else if(dA!==null){if(rt-dA>=5)drops.push({a:dA,b:rt,min:dMin});dA=null;}
+  }
+  if(dA!==null&&Math.floor(total)-dA>=5)drops.push({a:dA,b:Math.floor(total),min:dMin});
+  const segStats=segs.filter(s=>s.kind!=="move").map(s=>{
+    const vs:number[]=[]; for(let rt=Math.ceil(s.a);rt<s.b;rt++){const v=at(rt);if(v!==null)vs.push(v);}
+    return {...s,avg:vs.length?Math.round(vs.reduce((a,b)=>a+b,0)/vs.length):null,max:vs.length?Math.max(...vs):null,above:vs.filter(v=>v>=thr).length};
+  });
+  const e0=at(total),e1=at(total+60);
+  return {total,segs,segOf,peak,thr,start,firstUp,above,covered,drops,segStats,recovery:e0!==null&&e1!==null?e0-e1:null};
+}
+function HrChart({hr,h}:{hr:HrData,h:any}){
+  const a=hrAnalyze(hr,h); const total=a.total;
+  const tA=-Math.min(15,hr.off), tB=Math.min(hr.bpm.length-1-hr.off,total+60);
+  if(tB<=tA+5)return null;
+  const pts:{t:number,v:number}[]=[]; for(let t=Math.ceil(tA);t<=tB;t++){const i=Math.round(hr.off+t);if(i>=0&&i<hr.bpm.length)pts.push({t,v:hr.bpm[i]});}
+  const vs=pts.map(p=>p.v); const lo=Math.floor((Math.min(...vs)-5)/10)*10, hi=Math.ceil((Math.max(...vs)+3)/10)*10;
+  const W=320,H=150,L=26,R=6,T=16,B=18;
+  const X=(t:number)=>L+(t-tA)/(tB-tA)*(W-L-R), Y=(v:number)=>T+(hi-v)/(hi-lo)*(H-T-B);
+  const line=pts.map((p,i)=>`${i?"L":"M"}${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join("");
+  const area=`${line}L${X(pts[pts.length-1].t).toFixed(1)},${H-B}L${X(pts[0].t).toFixed(1)},${H-B}Z`;
+  const ticks:number[]=[]; for(let t=0;t<=tB;t+=60)if(t>=tA)ticks.push(t);
+  const yt:number[]=[]; for(let v=lo;v<=hi;v+=hi-lo>60?20:10)yt.push(v);
+  return(
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{display:"block"}}>
+      <defs><linearGradient id="hrfill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#ea4335" stopOpacity={0.28}/><stop offset="100%" stopColor="#ea4335" stopOpacity={0.03}/></linearGradient></defs>
+      {a.segs.map((s,i)=>{const x1=X(Math.max(s.a,tA)),x2=X(Math.min(s.b,tB));if(x2<=x1)return null;
+        const fill=s.kind==="move"?"#ffffff":s.kind==="course"?(i%2?"#fff4e5":"#fde9cc"):(i%2?"#eef4fe":"#dfeafd");
+        return(<g key={i}><rect x={x1} y={T} width={x2-x1} height={H-T-B} fill={fill}/>{s.short&&x2-x1>=9&&<text x={(x1+x2)/2} y={T-4} textAnchor="middle" fontSize={x2-x1<16?6:7} fill={PC.textSub}>{s.short}</text>}</g>);})}
+      {yt.map(v=><g key={v}><line x1={L} x2={W-R} y1={Y(v)} y2={Y(v)} stroke={PC.borderLight} strokeWidth={0.6}/><text x={L-3} y={Y(v)+2.5} textAnchor="end" fontSize={7} fill={PC.textLight}>{v}</text></g>)}
+      <path d={area} fill="url(#hrfill)"/>
+      <path d={line} fill="none" stroke="#ea4335" strokeWidth={1.4} strokeLinejoin="round"/>
+      <line x1={L} x2={W-R} y1={Y(a.thr)} y2={Y(a.thr)} stroke="#b06000" strokeDasharray="4,3" strokeWidth={1}/>
+      <text x={W-R-2} y={Y(a.thr)-3} textAnchor="end" fontSize={7} fill="#b06000" fontWeight={700} stroke="#ffffff" strokeWidth={2.5} paintOrder="stroke">역치 {a.thr}</text>
+      {[0,total].map((t,i)=>t>=tA&&t<=tB&&<line key={i} x1={X(t)} x2={X(t)} y1={T} y2={H-B} stroke={PC.text} strokeWidth={0.8} strokeDasharray={i?"2,2":undefined}/>)}
+      {total<=tB&&<text x={X(total)+2} y={H-B-3} fontSize={7} fill={PC.text}>완주</text>}
+      {ticks.map(t=><text key={t} x={X(t)} y={H-5} textAnchor="middle" fontSize={7} fill={PC.textLight}>{fmtMS(t)}</text>)}
+    </svg>
+  );
+}
+function HrView({hr,h}:{hr:HrData,h:any}){
+  const a=hrAnalyze(hr,h);
+  const chip=(bg:string,fg:string)=>({fontSize:12,background:bg,color:fg,borderRadius:8,padding:"6px 9px",lineHeight:1.45}) as any;
+  const pct=a.covered?Math.round(a.above/a.covered*100):0;
+  return(
+    <div style={{textAlign:"left"}}>
+      <HrChart hr={hr} h={h}/>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",margin:"6px 0"}}>
+        <span style={{fontSize:11,background:PC.borderLight,color:PC.textSub,borderRadius:6,padding:"2px 7px"}}>최고 {a.peak}</span>
+        <span style={{fontSize:11,background:"#fef7e0",color:"#b06000",borderRadius:6,padding:"2px 7px"}}>역치(추정) {a.thr} = 최고의 {Math.round(HR_THR_PCT*100)}%</span>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:5}}>
+        <div style={chip("#fce8e6","#a50e0e")}>⬆️ <b>상승</b> {a.firstUp===null?`역치(${a.thr})에 닿지 않았어요`:<>출발 {a.start??"-"} → <b>{a.firstUp}초</b> 만에 역치 도달 <span style={{color:PC.textSub}}>({a.segOf(a.firstUp)})</span></>}</div>
+        <div style={chip("#fef7e0","#7a4500")}>🔥 <b>역치 유지</b> {fmtMS(a.above)} <span style={{color:PC.textSub}}>(측정 시간의 {pct}%)</span></div>
+        <div style={chip(PC.primaryLight,PC.primaryDark)}>⬇️ <b>하락</b> {a.drops.length===0?(a.firstUp===null?"-":"역치 아래로 떨어진 구간 없음"):a.drops.map((d,i)=><span key={i}>{i?" · ":""}{a.segOf(d.a)} {fmtMS(d.a)}~{fmtMS(d.b)} (최저 {d.min})</span>)}</div>
+        {a.recovery!==null&&<div style={chip(PC.successLight,"#137333")}>💚 <b>회복</b> 완주 후 1분 동안 {a.recovery}bpm 떨어짐</div>}
+      </div>
+      {a.segStats.length>0&&(
+        <div style={{marginTop:8,display:"grid",gridTemplateColumns:"auto 1fr 1fr 1fr",fontSize:11,rowGap:2,columnGap:8}}>
+          <span style={{color:PC.textLight}}>구간</span><span style={{color:PC.textLight,textAlign:"right"}}>평균</span><span style={{color:PC.textLight,textAlign:"right"}}>최고</span><span style={{color:PC.textLight,textAlign:"right"}}>역치↑</span>
+          {a.segStats.map((s,i)=>[
+            <span key={i+"l"} style={{color:PC.text,fontWeight:600}}>{s.label}</span>,
+            <span key={i+"a"} style={{textAlign:"right",color:PC.text}}>{s.avg??"-"}</span>,
+            <span key={i+"m"} style={{textAlign:"right",color:s.max!==null&&s.max>=a.thr?"#b06000":PC.text}}>{s.max??"-"}</span>,
+            <span key={i+"u"} style={{textAlign:"right",color:PC.textSub}}>{s.avg===null?"-":`${s.above}초`}</span>,
+          ])}
+        </div>
+      )}
+    </div>
+  );
+}
+// 관리자: 캡처 올리기 → 숫자 확인 → 시작점 맞추기 → 저장
+function HrBox({data,onSave}:{data:any,onSave:(updated:any)=>void}){
+  const hr:HrData|null=data.hr&&Array.isArray(data.hr.bpm)?data.hr:null;
+  const total=Number(data.total_sec||data.total_time||0);
+  const [mode,setMode]=useState<"view"|"edit">("view");
+  const [trace,setTrace]=useState<{xs:number[],ys:number[]}|null>(null);
+  const [avg,setAvg]=useState(""); const [max,setMax]=useState(""); const [end,setEnd]=useState("");
+  const [off,setOff]=useState(0);
+  const [busy,setBusy]=useState(""); const [err,setErr]=useState(""); const [saving,setSaving]=useState(false);
+  const fileRef=useRef<HTMLInputElement>(null);
+  const nAvg=Number(avg),nMax=Number(max),dur=parseMS(end);
+  const numsOk=nAvg>40&&nMax>nAvg&&nMax<240&&dur>=30;
+  const bpm:number[]|null=trace?(numsOk?hrSeries(trace,nAvg,nMax,dur):null):(hr?hr.bpm:null);
+  const draft:HrData|null=bpm?{v:1,bpm,off,avg:trace?nAvg:hr!.avg,max:trace?nMax:hr!.max,dur:trace?dur:hr!.dur}:null;
+  const lastAuto=useRef("");
+  useEffect(()=>{ // 숫자가 바뀌면 시작점 자동으로 다시 잡기
+    if(!trace||!bpm)return; const k=`${avg}|${max}|${end}`; if(lastAuto.current===k)return; lastAuto.current=k; setOff(hrAutoOff(bpm,total));
+  },[trace,avg,max,end]);
+  async function pick(f:File){
+    setErr("");setBusy("캡처 읽는 중…");setMode("edit");setTrace(null);lastAuto.current="";
+    const [img,nums]=await Promise.allSettled([hrLoadImage(f).then(hrTrace),hrReadNumbers(f,HR_PW)]);
+    setBusy("");
+    const t=img.status==="fulfilled"?img.value:null;
+    if(!t){setErr("캡처에서 심박 그래프를 찾지 못했어요. 시계 앱의 심박수 그래프가 보이게 캡처해 주세요.");setMode(hr?"view":"edit");return;}
+    if(nums.status==="fulfilled"){setAvg(nums.value.avg?String(nums.value.avg):"");setMax(nums.value.max?String(nums.value.max):"");setEnd(nums.value.end||"");}
+    else{setAvg("");setMax("");setEnd("");setErr("숫자를 자동으로 못 읽었어요. 평균·최대·그래프 끝 시간을 직접 넣어주세요.");}
+    setTrace(t);
+  }
+  async function save(){
+    if(!draft)return; setSaving(true);
+    try{ await dbPatch("records",data.id,{hr:draft}); onSave({...data,hr:draft}); setMode("view"); setTrace(null); }
+    catch(e:any){alert("저장 실패: "+e.message);}
+    setSaving(false);
+  }
+  async function remove(){
+    if(!confirm("이 기록의 심박 그래프를 지울까요?"))return;
+    try{ await dbPatch("records",data.id,{hr:null}); onSave({...data,hr:null}); }catch(e:any){alert("삭제 실패: "+e.message);}
+  }
+  const sBtn:any={background:PC.borderLight,border:"none",borderRadius:8,padding:"4px 10px",fontSize:12,color:PC.textSub,cursor:"pointer",fontWeight:600,whiteSpace:"nowrap"};
+  const numIn:any={...inSt,padding:"6px 8px",fontSize:13,textAlign:"center"};
+  const maxOff=draft?Math.max(0,draft.bpm.length-1):0;
+  return(
+    <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${PC.borderLight}`}}>
+      <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];e.target.value="";if(f)pick(f);}}/>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:hr||mode==="edit"?6:0}}>
+        <b style={{fontSize:12,color:PC.text}}>❤️ 심박</b>
+        {mode==="view"&&(hr
+          ?<div style={{display:"flex",gap:4}}><button style={sBtn} onClick={()=>{setTrace(null);setOff(hr.off);setErr("");setMode("edit");}}>시작점 조정</button><button style={sBtn} onClick={()=>fileRef.current?.click()}>다시 올리기</button><button style={sBtn} onClick={remove}>삭제</button></div>
+          :<button onClick={()=>fileRef.current?.click()} style={{...sBtn,background:"#fce8e6",color:"#a50e0e"}}>❤️ 심박 캡처 올리기</button>)}
+      </div>
+      {err&&<div style={{fontSize:12,color:PC.danger,marginBottom:6}}>{err}</div>}
+      {mode==="view"&&hr&&<HrView hr={hr} h={data}/>}
+      {mode==="edit"&&(
+        <div>
+          {busy&&<div style={{fontSize:13,color:PC.textSub}}>{busy}</div>}
+          {trace&&(
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:6}}>
+              <label style={{fontSize:11,color:PC.textSub}}>평균<input inputMode="numeric" value={avg} onChange={e=>setAvg(e.target.value.replace(/\D/g,""))} style={numIn}/></label>
+              <label style={{fontSize:11,color:PC.textSub}}>최대<input inputMode="numeric" value={max} onChange={e=>setMax(e.target.value.replace(/\D/g,""))} style={numIn}/></label>
+              <label style={{fontSize:11,color:PC.textSub}}>그래프 끝 시간<input value={end} placeholder="4:48" onChange={e=>setEnd(e.target.value)} style={numIn}/></label>
+            </div>
+          )}
+          {trace&&!numsOk&&<div style={{fontSize:12,color:PC.danger,marginBottom:6}}>평균·최대·끝 시간(분:초)을 확인해 주세요.</div>}
+          {draft&&(
+            <>
+              <HrChart hr={draft} h={data}/>
+              <div style={{fontSize:12,color:PC.textSub,margin:"6px 0 2px"}}>시작점 맞추기: 굵은 세로선(출발)이 실제 출발 지점에 오게 밀어주세요 · 시계 {fmtMS(off)} = 출발</div>
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <button style={sBtn} onClick={()=>setOff(o=>Math.max(0,o-1))}>◀ 1초</button>
+                <input type="range" min={0} max={maxOff} value={off} onChange={e=>setOff(Number(e.target.value))} style={{flex:1}}/>
+                <button style={sBtn} onClick={()=>setOff(o=>Math.min(maxOff,o+1))}>1초 ▶</button>
+                <button style={sBtn} onClick={()=>draft&&setOff(hrAutoOff(draft.bpm,total))}>자동</button>
+              </div>
+            </>
+          )}
+          {!busy&&(
+            <div style={{display:"flex",gap:6,marginTop:8}}>
+              <button onClick={()=>{setMode("view");setTrace(null);setErr("");}} style={{flex:1,padding:"7px",borderRadius:8,border:`1px solid ${PC.border}`,background:PC.white,color:PC.textSub,fontSize:13,cursor:"pointer"}}>취소</button>
+              <button onClick={save} disabled={!draft||saving} style={{flex:2,padding:"7px",borderRadius:8,border:"none",background:draft?PC.primary:PC.border,color:PC.white,fontSize:13,fontWeight:700,cursor:draft?"pointer":"default"}}>{saving?"저장 중...":"저장"}</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated:any)=>void,isAdmin?:boolean}){
   const [editing,setEditing]=useState(false);
   const [ratingOpen,setRatingOpen]=useState(false);
@@ -952,6 +1208,8 @@ function RecordCard({h,prev,onUpdate,isAdmin}:{h:any,prev:any,onUpdate?:(updated
           })}
         </div>
         {(data.move_time||0)>0&&<div style={{fontSize:12,color:PC.textSub,marginTop:4}}>이동시간 {secToDisplay(data.move_time)}</div>}
+        {isAdmin&&HR_PW&&(data.academy_code||"bias")==="bias"&&(data.hr||data.ratings?._by==="coach")&&<HrBox data={data} onSave={d=>{setData(d);onUpdate&&onUpdate(d);}}/>}
+        {!isAdmin&&data.hr?.bpm&&<div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${PC.borderLight}`}}><b style={{fontSize:12,color:PC.text}}>❤️ 심박</b><HrView hr={data.hr} h={data}/></div>}
         {hasR&&(
           <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${PC.borderLight}`,display:"flex",gap:6,flexWrap:"wrap"}}>
             {r.condition&&<span style={{fontSize:12,background:PC.primaryLight,color:PC.primaryDark,borderRadius:20,padding:"3px 10px"}}>컨디션 {r.condition}/5</span>}
@@ -1147,7 +1405,7 @@ export default function App(){
     let isMaster=false;
     try{ isMaster=!!(await dbRpc("master_login",{p_pw:loginPw})); }catch{}
     if(isMaster){
-      setMasterPw(loginPw);
+      setMasterPw(loginPw);HR_PW=loginPw;
       setUser({name:"원장님",isAdmin:true});
       const [rows,stus]=await Promise.all([
         dbGetAll("records","source=eq.bias&order=created_at.desc,id.asc"),
@@ -1299,7 +1557,7 @@ export default function App(){
             <LogoBox/>
             <div><div style={{fontSize:15,fontWeight:800,color:PC.text}}>{APP_TITLE}</div><div style={{fontSize:12,color:PC.textSub}}>관리자</div></div>
           </div>
-          <button onClick={()=>{setScreen("login");setLoginName("");setLoginPw("");setMasterPw("");}} style={{fontSize:13,color:PC.textSub,background:PC.white,border:`1px solid ${PC.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer"}}>로그아웃</button>
+          <button onClick={()=>{setScreen("login");setLoginName("");setLoginPw("");setMasterPw("");HR_PW="";}} style={{fontSize:13,color:PC.textSub,background:PC.white,border:`1px solid ${PC.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer"}}>로그아웃</button>
         </div>
       </div>
       {/* 관리자 탭 */}
