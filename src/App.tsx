@@ -1049,14 +1049,16 @@ function HrAlignChart({bpm,off,setOff,h}:{bpm:number[],off:number,setOff:(n:numb
   const area=`${line}L${X(dur).toFixed(1)},${H-B}L${X(0).toFixed(1)},${H-B}Z`;
   const step=dur>420?120:60; const ticks:number[]=[]; for(let t=0;t<=dur;t+=step/2)ticks.push(t);
   const yt:number[]=[]; for(let v=lo;v<=hi;v+=hi-lo>60?20:10)yt.push(v);
-  const drag=useRef(false);
-  const pick=(e:any)=>{const r=e.currentTarget.getBoundingClientRect();const vx=(e.clientX-r.left)/r.width*W;setOff(Math.max(0,Math.min(dur,Math.round((vx-L)/(W-L-R)*dur))));};
-  const fx=X(off), ex=X(Math.min(dur,off+total));
+  // 끌면 측정 상자 전체가 같이 이동, 끌지 않고 톡 누르면 그 자리가 출발
+  const drag=useRef<{x:number,off:number,t:number,moved:boolean}|null>(null);
+  const clamp=(v:number)=>Math.max(0,Math.min(dur,Math.round(v)));
+  const tAt=(e:any)=>{const r=e.currentTarget.getBoundingClientRect();return ((e.clientX-r.left)/r.width*W-L)/(W-L-R)*dur;};
+  const fx=X(off), ex=X(Math.min(dur,off+total)), over=off+total>dur;
   return(
-    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{display:"block",touchAction:"pan-y",cursor:"crosshair",userSelect:"none"}}
-      onPointerDown={e=>{drag.current=true;(e.currentTarget as any).setPointerCapture?.(e.pointerId);pick(e);}}
-      onPointerMove={e=>{if(drag.current)pick(e);}}
-      onPointerUp={()=>{drag.current=false;}} onPointerCancel={()=>{drag.current=false;}}>
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{display:"block",touchAction:"pan-y",cursor:"grab",userSelect:"none"}}
+      onPointerDown={e=>{drag.current={x:e.clientX,off,t:tAt(e),moved:false};(e.currentTarget as any).setPointerCapture?.(e.pointerId);}}
+      onPointerMove={e=>{const d=drag.current;if(!d)return;const r=e.currentTarget.getBoundingClientRect();const dx=e.clientX-d.x;if(Math.abs(dx)>4)d.moved=true;if(d.moved)setOff(clamp(d.off+dx/r.width*W/(W-L-R)*dur));}}
+      onPointerUp={()=>{const d=drag.current;if(d&&!d.moved)setOff(clamp(d.t));drag.current=null;}} onPointerCancel={()=>{drag.current=null;}}>
       <defs><linearGradient id="hrfill2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#ea4335" stopOpacity={0.28}/><stop offset="100%" stopColor="#ea4335" stopOpacity={0.03}/></linearGradient></defs>
       {segs.map((sg,i)=>{const x1=X(Math.min(dur,off+sg.a)),x2=X(Math.min(dur,off+sg.b));if(x2<=x1)return null;
         const fill=sg.kind==="move"?"#ffffff":sg.kind==="course"?(i%2?"#fff4e5":"#fde9cc"):(i%2?"#eef4fe":"#dfeafd");
@@ -1064,10 +1066,14 @@ function HrAlignChart({bpm,off,setOff,h}:{bpm:number[],off:number,setOff:(n:numb
       {yt.map(v=><g key={v}><line x1={L} x2={W-R} y1={Y(v)} y2={Y(v)} stroke={PC.borderLight} strokeWidth={0.6}/><text x={L-3} y={Y(v)+2.5} textAnchor="end" fontSize={7} fill={PC.textLight}>{v}</text></g>)}
       <path d={area} fill="url(#hrfill2)"/>
       <path d={line} fill="none" stroke="#ea4335" strokeWidth={1.4} strokeLinejoin="round"/>
-      {off+total<=dur&&<><line x1={ex} x2={ex} y1={T} y2={H-B} stroke={PC.text} strokeWidth={0.8} strokeDasharray="2,2"/><text x={ex>W-R-20?ex-2:ex+2} y={H-B-3} textAnchor={ex>W-R-20?"end":"start"} fontSize={7} fill={PC.text} stroke="#fff" strokeWidth={2} paintOrder="stroke">완주</text></>}
+      {fx>L&&<rect x={L} y={T} width={fx-L} height={H-T-B} fill="#ffffff" opacity={0.6}/>}
+      {!over&&ex<W-R&&<rect x={ex} y={T} width={W-R-ex} height={H-T-B} fill="#ffffff" opacity={0.6}/>}
+      <rect x={fx} y={T} width={Math.max(1,ex-fx)} height={H-T-B} fill="none" stroke={PC.primary} strokeWidth={1.5} rx={2}/>
+      <text x={(fx+ex)/2} y={H-B-5} textAnchor="middle" fontSize={8} fontWeight={700} fill={PC.primaryDark} stroke="#fff" strokeWidth={2.5} paintOrder="stroke">측정 {fmtMS(total)}{over?" (캡처보다 김)":""}</text>
+      {!over&&<text x={ex>W-R-20?ex-2:ex+2} y={T+9} textAnchor={ex>W-R-20?"end":"start"} fontSize={7} fill={PC.primaryDark} stroke="#fff" strokeWidth={2} paintOrder="stroke">완주 {fmtMS(off+total)}</text>}
       <line x1={fx} x2={fx} y1={T-2} y2={H-B} stroke={PC.primary} strokeWidth={2}/>
       <circle cx={fx} cy={Y(bpm[off])} r={3.5} fill={PC.primary} stroke="#fff" strokeWidth={1.5}/>
-      <text x={fx<W-70?fx+4:fx-4} y={T+9} textAnchor={fx<W-70?"start":"end"} fontSize={8} fontWeight={700} fill={PC.primary} stroke="#fff" strokeWidth={2.5} paintOrder="stroke">출발 {fmtMS(off)}</text>
+      <text x={fx<W-70?fx+4:fx-4} y={T+20} textAnchor={fx<W-70?"start":"end"} fontSize={8} fontWeight={700} fill={PC.primary} stroke="#fff" strokeWidth={2.5} paintOrder="stroke">출발 {fmtMS(off)}</text>
       {ticks.map(t=><g key={t}><line x1={X(t)} x2={X(t)} y1={H-B} y2={H-B+3} stroke={PC.textLight} strokeWidth={0.6}/>{t%step===0&&<text x={X(t)} y={H-5} textAnchor="middle" fontSize={7} fill={PC.textLight}>{fmtMS(t)}</text>}</g>)}
     </svg>
   );
@@ -1141,7 +1147,7 @@ function HrBox({data,onSave}:{data:any,onSave:(updated:any)=>void}){
           {draft&&(
             <>
               <div style={{fontSize:12,fontWeight:700,color:PC.text,margin:"2px 0 2px"}}>출발 지점 정하기</div>
-              <div style={{fontSize:12,color:PC.textSub,marginBottom:4,lineHeight:1.5}}>시계 캡처와 같은 시간이에요. 심박이 확 오르기 시작하는 곳을 그래프에서 톡 누르거나, 시간을 직접 넣어주세요.</div>
+              <div style={{fontSize:12,color:PC.textSub,marginBottom:4,lineHeight:1.5}}>파란 상자 = 이번 측정({fmtMS(total)}). 상자를 끌어서 왼쪽 끝을 심박이 확 오르는 곳에 맞추세요. 끝은 자동으로 맞춰져요.</div>
               <HrAlignChart bpm={draft.bpm} off={off} setOff={setOff} h={data}/>
               <div style={{display:"flex",alignItems:"center",gap:6,marginTop:6,flexWrap:"wrap"}}>
                 <span style={{fontSize:12,color:PC.text,fontWeight:700}}>출발 = 시계</span>
