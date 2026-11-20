@@ -895,11 +895,12 @@ async function hrLoadImage(file:File):Promise<ImageData>{
     return ctx.getImageData(0,0,c.width,c.height);
   }finally{URL.revokeObjectURL(url);}
 }
-// 분홍 칠이 넓게 깔린 줄 묶음 = 심박 그래프 영역 → 그 안에서 열마다 가장 위 빨간 점 = 심박 선
+// 빨간 기운이 넓게 깔린 줄 묶음 = 심박 그래프 영역 → 그 안에서 열마다 가장 위 빨간 점 = 심박 선
+// 흰 배경(빨간 선+분홍 칠)과 검은 배경(빨간 면) 시계 앱 화면 모두 지원
 function hrTrace(img:ImageData):{xs:number[],ys:number[]}|null{
   const {width:W,height:H,data:d}=img;
-  const isRed=(i:number)=>d[i]>190&&d[i+1]<150&&d[i+2]<150&&d[i]-d[i+1]>70;
-  const isPink=(i:number)=>d[i]>220&&d[i+1]>=120&&d[i+1]<=232&&d[i+2]>=120&&d[i+2]<=235&&d[i]-d[i+1]>=18;
+  const isRed=(i:number)=>d[i]>120&&d[i]-Math.max(d[i+1],d[i+2])>=40;
+  const isPink=isRed;
   let best:[number,number]|null=null,cur:[number,number]|null=null;
   const longer=(a:[number,number]|null,b:[number,number]|null)=>!a?b:!b?a:(a[1]-a[0]>=b[1]-b[0]?a:b);
   for(let y=0;y<H;y++){
