@@ -968,10 +968,10 @@ function hrAnalyze(hr:HrData,h:any){
   }
   const thr=Math.round(sPeak*HR_THR_PCT);
   const start=at(0);
-  let firstUp:number|null=null,above=0,covered=0;
+  let firstUp:number|null=null,above=0,covered=0,sum=0;
   const drops:{a:number,b:number,min:number}[]=[]; let dA:number|null=null,dMin=999;
   for(let rt=0;rt<=Math.floor(total);rt++){
-    const v=at(rt); if(v===null)continue; covered++;
+    const v=at(rt); if(v===null)continue; covered++; sum+=v;
     if(v>=thr){above++; if(firstUp===null)firstUp=rt;}
     if(firstUp!==null&&v<thr){if(dA===null){dA=rt;dMin=v;}else dMin=Math.min(dMin,v);}
     else if(dA!==null){if(rt-dA>=5)drops.push({a:dA,b:rt,min:dMin});dA=null;}
@@ -982,7 +982,8 @@ function hrAnalyze(hr:HrData,h:any){
     return {...s,avg:vs.length?Math.round(vs.reduce((a,b)=>a+b,0)/vs.length):null,max:vs.length?Math.max(...vs):null,above:vs.filter(v=>v>=thr).length};
   });
   const e0=at(total),e1=at(total+60);
-  return {total,segs,segOf,peak,thr,start,firstUp,above,covered,drops,segStats,recovery:e0!==null&&e1!==null?e0-e1:null};
+  const avg=covered?Math.round(sum/covered):null; // 측정 구간(출발~완주) 평균
+  return {total,segs,segOf,peak,avg,thr,start,firstUp,above,covered,drops,segStats,recovery:e0!==null&&e1!==null?e0-e1:null};
 }
 function HrChart({hr,h}:{hr:HrData,h:any}){
   const a=hrAnalyze(hr,h); const total=a.total;
@@ -1005,6 +1006,7 @@ function HrChart({hr,h}:{hr:HrData,h:any}){
       {yt.map(v=><g key={v}><line x1={L} x2={W-R} y1={Y(v)} y2={Y(v)} stroke={PC.borderLight} strokeWidth={0.6}/><text x={L-3} y={Y(v)+2.5} textAnchor="end" fontSize={7} fill={PC.textLight}>{v}</text></g>)}
       <path d={area} fill="url(#hrfill)"/>
       <path d={line} fill="none" stroke="#ea4335" strokeWidth={1.4} strokeLinejoin="round"/>
+      {a.avg!==null&&<><line x1={L} x2={W-R} y1={Y(a.avg)} y2={Y(a.avg)} stroke={PC.textSub} strokeDasharray="1,2" strokeWidth={1}/><text x={L+3} y={Y(a.avg)+(a.avg>a.thr-6?9:-3)} fontSize={7} fill={PC.textSub} stroke="#ffffff" strokeWidth={2.5} paintOrder="stroke">평균 {a.avg}</text></>}
       <line x1={L} x2={W-R} y1={Y(a.thr)} y2={Y(a.thr)} stroke="#b06000" strokeDasharray="4,3" strokeWidth={1}/>
       <text x={W-R-2} y={Y(a.thr)-3} textAnchor="end" fontSize={7} fill="#b06000" fontWeight={700} stroke="#ffffff" strokeWidth={2.5} paintOrder="stroke">역치 {a.thr}</text>
       {[0,total].map((t,i)=>t>=tA&&t<=tB&&<line key={i} x1={X(t)} x2={X(t)} y1={T} y2={H-B} stroke={PC.text} strokeWidth={0.8} strokeDasharray={i?"2,2":undefined}/>)}
@@ -1021,7 +1023,8 @@ function HrView({hr,h}:{hr:HrData,h:any}){
     <div style={{textAlign:"left"}}>
       <HrChart hr={hr} h={h}/>
       <div style={{display:"flex",gap:6,flexWrap:"wrap",margin:"6px 0"}}>
-        <span style={{fontSize:11,background:PC.borderLight,color:PC.textSub,borderRadius:6,padding:"2px 7px"}}>최고 {a.peak}</span>
+        <span style={{fontSize:11,background:PC.borderLight,color:PC.textSub,borderRadius:6,padding:"2px 7px"}}>평균 <b style={{color:PC.text}}>{a.avg??"-"}</b></span>
+        <span style={{fontSize:11,background:PC.borderLight,color:PC.textSub,borderRadius:6,padding:"2px 7px"}}>최고 <b style={{color:PC.text}}>{a.peak}</b></span>
         <span style={{fontSize:11,background:"#fef7e0",color:"#b06000",borderRadius:6,padding:"2px 7px"}}>역치(추정) {a.thr} = 최고의 {Math.round(HR_THR_PCT*100)}%</span>
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:5}}>
