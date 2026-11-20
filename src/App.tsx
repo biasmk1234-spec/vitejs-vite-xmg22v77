@@ -1002,7 +1002,7 @@ function HrChart({hr,h}:{hr:HrData,h:any}){
       <line x1={L} x2={W-R} y1={Y(a.thr)} y2={Y(a.thr)} stroke="#b06000" strokeDasharray="4,3" strokeWidth={1}/>
       <text x={W-R-2} y={Y(a.thr)-3} textAnchor="end" fontSize={7} fill="#b06000" fontWeight={700} stroke="#ffffff" strokeWidth={2.5} paintOrder="stroke">역치 {a.thr}</text>
       {[0,total].map((t,i)=>t>=tA&&t<=tB&&<line key={i} x1={X(t)} x2={X(t)} y1={T} y2={H-B} stroke={PC.text} strokeWidth={0.8} strokeDasharray={i?"2,2":undefined}/>)}
-      {total<=tB&&<text x={X(total)+2} y={H-B-3} fontSize={7} fill={PC.text}>완주</text>}
+      {total<=tB&&<text x={X(total)>W-R-20?X(total)-2:X(total)+2} y={H-B-3} textAnchor={X(total)>W-R-20?"end":"start"} fontSize={7} fill={PC.text} stroke="#fff" strokeWidth={2} paintOrder="stroke">완주</text>}
       {ticks.map(t=><text key={t} x={X(t)} y={H-5} textAnchor="middle" fontSize={7} fill={PC.textLight}>{fmtMS(t)}</text>)}
     </svg>
   );
@@ -1036,6 +1036,40 @@ function HrView({hr,h}:{hr:HrData,h:any}){
         </div>
       )}
     </div>
+  );
+}
+// 시작점 맞추기용: 시계 캡처와 같은 시간축(시계 0:00~끝)으로 그리고, 누른 곳 = 출발
+function HrAlignChart({bpm,off,setOff,h}:{bpm:number[],off:number,setOff:(n:number)=>void,h:any}){
+  const total=Number(h.total_sec||h.total_time||0); const dur=bpm.length-1;
+  const segs=hrSegs(h);
+  const lo=Math.floor((Math.min(...bpm)-5)/10)*10, hi=Math.ceil((Math.max(...bpm)+3)/10)*10;
+  const W=320,H=170,L=26,R=6,T=16,B=18;
+  const X=(t:number)=>L+t/dur*(W-L-R), Y=(v:number)=>T+(hi-v)/(hi-lo)*(H-T-B);
+  const line=bpm.map((v,i)=>`${i?"L":"M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+  const area=`${line}L${X(dur).toFixed(1)},${H-B}L${X(0).toFixed(1)},${H-B}Z`;
+  const step=dur>420?120:60; const ticks:number[]=[]; for(let t=0;t<=dur;t+=step/2)ticks.push(t);
+  const yt:number[]=[]; for(let v=lo;v<=hi;v+=hi-lo>60?20:10)yt.push(v);
+  const drag=useRef(false);
+  const pick=(e:any)=>{const r=e.currentTarget.getBoundingClientRect();const vx=(e.clientX-r.left)/r.width*W;setOff(Math.max(0,Math.min(dur,Math.round((vx-L)/(W-L-R)*dur))));};
+  const fx=X(off), ex=X(Math.min(dur,off+total));
+  return(
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{display:"block",touchAction:"pan-y",cursor:"crosshair",userSelect:"none"}}
+      onPointerDown={e=>{drag.current=true;(e.currentTarget as any).setPointerCapture?.(e.pointerId);pick(e);}}
+      onPointerMove={e=>{if(drag.current)pick(e);}}
+      onPointerUp={()=>{drag.current=false;}} onPointerCancel={()=>{drag.current=false;}}>
+      <defs><linearGradient id="hrfill2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#ea4335" stopOpacity={0.28}/><stop offset="100%" stopColor="#ea4335" stopOpacity={0.03}/></linearGradient></defs>
+      {segs.map((sg,i)=>{const x1=X(Math.min(dur,off+sg.a)),x2=X(Math.min(dur,off+sg.b));if(x2<=x1)return null;
+        const fill=sg.kind==="move"?"#ffffff":sg.kind==="course"?(i%2?"#fff4e5":"#fde9cc"):(i%2?"#eef4fe":"#dfeafd");
+        return(<g key={i}><rect x={x1} y={T} width={x2-x1} height={H-T-B} fill={fill}/>{sg.short&&x2-x1>=9&&<text x={(x1+x2)/2} y={T-4} textAnchor="middle" fontSize={x2-x1<16?6:7} fill={PC.textSub}>{sg.short}</text>}</g>);})}
+      {yt.map(v=><g key={v}><line x1={L} x2={W-R} y1={Y(v)} y2={Y(v)} stroke={PC.borderLight} strokeWidth={0.6}/><text x={L-3} y={Y(v)+2.5} textAnchor="end" fontSize={7} fill={PC.textLight}>{v}</text></g>)}
+      <path d={area} fill="url(#hrfill2)"/>
+      <path d={line} fill="none" stroke="#ea4335" strokeWidth={1.4} strokeLinejoin="round"/>
+      {off+total<=dur&&<><line x1={ex} x2={ex} y1={T} y2={H-B} stroke={PC.text} strokeWidth={0.8} strokeDasharray="2,2"/><text x={ex>W-R-20?ex-2:ex+2} y={H-B-3} textAnchor={ex>W-R-20?"end":"start"} fontSize={7} fill={PC.text} stroke="#fff" strokeWidth={2} paintOrder="stroke">완주</text></>}
+      <line x1={fx} x2={fx} y1={T-2} y2={H-B} stroke={PC.primary} strokeWidth={2}/>
+      <circle cx={fx} cy={Y(bpm[off])} r={3.5} fill={PC.primary} stroke="#fff" strokeWidth={1.5}/>
+      <text x={fx<W-70?fx+4:fx-4} y={T+9} textAnchor={fx<W-70?"start":"end"} fontSize={8} fontWeight={700} fill={PC.primary} stroke="#fff" strokeWidth={2.5} paintOrder="stroke">출발 {fmtMS(off)}</text>
+      {ticks.map(t=><g key={t}><line x1={X(t)} x2={X(t)} y1={H-B} y2={H-B+3} stroke={PC.textLight} strokeWidth={0.6}/>{t%step===0&&<text x={X(t)} y={H-5} textAnchor="middle" fontSize={7} fill={PC.textLight}>{fmtMS(t)}</text>}</g>)}
+    </svg>
   );
 }
 // 관리자: 캡처 올리기 → 숫자 확인 → 시작점 맞추기 → 저장
@@ -1079,6 +1113,9 @@ function HrBox({data,onSave}:{data:any,onSave:(updated:any)=>void}){
   const sBtn:any={background:PC.borderLight,border:"none",borderRadius:8,padding:"4px 10px",fontSize:12,color:PC.textSub,cursor:"pointer",fontWeight:600,whiteSpace:"nowrap"};
   const numIn:any={...inSt,padding:"6px 8px",fontSize:13,textAlign:"center"};
   const maxOff=draft?Math.max(0,draft.bpm.length-1):0;
+  const [offTxt,setOffTxt]=useState("");
+  useEffect(()=>{setOffTxt(fmtMS(off));},[off]);
+  function applyOffTxt(){const v=parseMS(offTxt.includes(":")?offTxt:`0:${offTxt.padStart(2,"0")}`);if(isFinite(v))setOff(Math.max(0,Math.min(maxOff,v)));else setOffTxt(fmtMS(off));}
   return(
     <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${PC.borderLight}`}}>
       <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];e.target.value="";if(f)pick(f);}}/>
@@ -1103,14 +1140,20 @@ function HrBox({data,onSave}:{data:any,onSave:(updated:any)=>void}){
           {trace&&!numsOk&&<div style={{fontSize:12,color:PC.danger,marginBottom:6}}>평균·최대·끝 시간(분:초)을 확인해 주세요.</div>}
           {draft&&(
             <>
-              <HrChart hr={draft} h={data}/>
-              <div style={{fontSize:12,color:PC.textSub,margin:"6px 0 2px"}}>시작점 맞추기: 굵은 세로선(출발)이 실제 출발 지점에 오게 밀어주세요 · 시계 {fmtMS(off)} = 출발</div>
-              <div style={{display:"flex",alignItems:"center",gap:6}}>
-                <button style={sBtn} onClick={()=>setOff(o=>Math.max(0,o-1))}>◀ 1초</button>
-                <input type="range" min={0} max={maxOff} value={off} onChange={e=>setOff(Number(e.target.value))} style={{flex:1}}/>
-                <button style={sBtn} onClick={()=>setOff(o=>Math.min(maxOff,o+1))}>1초 ▶</button>
-                <button style={sBtn} onClick={()=>draft&&setOff(hrAutoOff(draft.bpm,total))}>자동</button>
+              <div style={{fontSize:12,fontWeight:700,color:PC.text,margin:"2px 0 2px"}}>출발 지점 정하기</div>
+              <div style={{fontSize:12,color:PC.textSub,marginBottom:4,lineHeight:1.5}}>시계 캡처와 같은 시간이에요. 심박이 확 오르기 시작하는 곳을 그래프에서 톡 누르거나, 시간을 직접 넣어주세요.</div>
+              <HrAlignChart bpm={draft.bpm} off={off} setOff={setOff} h={data}/>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginTop:6,flexWrap:"wrap"}}>
+                <span style={{fontSize:12,color:PC.text,fontWeight:700}}>출발 = 시계</span>
+                <input value={offTxt} onChange={e=>setOffTxt(e.target.value)} onBlur={applyOffTxt} onKeyDown={e=>{if(e.key==="Enter")applyOffTxt();}} placeholder="1:15" style={{...numIn,width:64}}/>
+                <span style={{fontSize:12,color:PC.textSub}}>심박 {draft.bpm[off]}</span>
               </div>
+              <div style={{display:"flex",gap:4,marginTop:6}}>
+                {[-5,-1,1,5].map(d=><button key={d} style={{...sBtn,flex:1,padding:"7px 0"}} onClick={()=>setOff(o=>Math.max(0,Math.min(maxOff,o+d)))}>{d<0?`◀ ${-d}초`:`${d}초 ▶`}</button>)}
+                <button style={{...sBtn,flex:1,padding:"7px 0"}} onClick={()=>draft&&setOff(hrAutoOff(draft.bpm,total))}>자동</button>
+              </div>
+              <div style={{fontSize:12,fontWeight:700,color:PC.text,margin:"10px 0 2px"}}>미리보기</div>
+              <HrChart hr={draft} h={data}/>
             </>
           )}
           {!busy&&(
