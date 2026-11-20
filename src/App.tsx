@@ -871,9 +871,9 @@ function CoachVoiceBox({data,onSave}:{data:any,onSave:(updated:any)=>void}){
 
 // ── 심박 (시계 앱 심박 캡처 → 1초 단위 심박, 구간별 그래프) ──
 // 저장 형식 records.hr = {v:1, bpm:[시계 시간 0초부터 1초 단위], off:스톱워치 0초일 때의 시계 시간(초), avg, max, dur}
-// 역치는 캡처 속 시계 영역(시계 주인 기준)이 아니라 이번 측정 최고 심박의 90%로 추정
+// 역치는 캡처 속 시계 영역(시계 주인 기준)이 아니라 이번 측정 최고 심박(5초 평균)의 95%로 추정
 let HR_PW="";
-const HR_THR_PCT=0.9;
+const HR_THR_PCT=0.95; // 역치 = 측정 중 최고(5초 평균, 순간 튐 제외)의 95%
 type HrData={v:1,bpm:number[],off:number,avg:number,max:number,dur:number};
 type HrSeg={label:string,short:string,a:number,b:number,kind:"lap"|"course"|"move"};
 const HR_SHORT:Record<string,string>={hurdle:"허들",resistance:"밀당",rescue:"구조",trigger:"방아쇠"};
@@ -959,8 +959,13 @@ function hrAnalyze(hr:HrData,h:any){
   const at=(rt:number)=>{const i=Math.round(hr.off+rt);return i>=0&&i<hr.bpm.length?hr.bpm[i]:null;};
   const segs=hrSegs(h);
   const segOf=(rt:number)=>segs.find(s=>rt>=s.a&&rt<s.b)?.label||(rt>=total?"완주 후":"");
-  let peak=0; for(let rt=0;rt<=total+30;rt++){const v=at(rt);if(v!==null&&v>peak)peak=v;}
-  const thr=Math.round(peak*HR_THR_PCT);
+  let peak=0,sPeak=0;
+  for(let rt=0;rt<=total+30;rt++){
+    const v=at(rt); if(v===null)continue; if(v>peak)peak=v;
+    const w=[-2,-1,0,1,2].map(d=>at(rt+d)).filter((x):x is number=>x!==null);
+    const m=w.reduce((a,b)=>a+b,0)/w.length; if(m>sPeak)sPeak=m;
+  }
+  const thr=Math.round(sPeak*HR_THR_PCT);
   const start=at(0);
   let firstUp:number|null=null,above=0,covered=0;
   const drops:{a:number,b:number,min:number}[]=[]; let dA:number|null=null,dMin=999;
