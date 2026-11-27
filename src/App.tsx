@@ -1356,6 +1356,63 @@ const LogoBox=({size=36,fs=18}:{size?:number,fs?:number})=>(
   <div style={{width:size,height:size,background:PC.primary,borderRadius:size*0.28,display:"flex",alignItems:"center",justifyContent:"center",fontSize:fs}}>🚔</div>
 );
 
+// ── 홈 화면 앱(PWA) 설치 안내 ── 로그인 화면에만 보인다. 이미 앱으로 열었거나 PC면 안 보인다.
+let deferredInstall:any=null;
+if(typeof window!=="undefined"){
+  window.addEventListener("beforeinstallprompt",(e:any)=>{e.preventDefault();deferredInstall=e;window.dispatchEvent(new Event("bias-install-ready"));});
+}
+function InstallHint(){
+  const [, force]=useState(0);
+  const [hidden,setHidden]=useState(()=>{try{return localStorage.getItem("bias_install_hint_off")==="1";}catch{return false;}});
+  const [open,setOpen]=useState(false);
+  useEffect(()=>{
+    const re=()=>force(x=>x+1);
+    const done=()=>{deferredInstall=null;setHidden(true);};
+    window.addEventListener("bias-install-ready",re);window.addEventListener("appinstalled",done);
+    return()=>{window.removeEventListener("bias-install-ready",re);window.removeEventListener("appinstalled",done);};
+  },[]);
+  const ua=navigator.userAgent||"";
+  const standalone=window.matchMedia?.("(display-mode: standalone)").matches||(navigator as any).standalone===true;
+  const ios=/iPhone|iPad|iPod/.test(ua)||(/Macintosh/.test(ua)&&navigator.maxTouchPoints>1);
+  const android=/Android/.test(ua);
+  const inApp=/KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line\//i.test(ua);
+  if(standalone||hidden||(!ios&&!android))return null;
+  const off=()=>{try{localStorage.setItem("bias_install_hint_off","1");}catch{}setHidden(true);};
+  const install=async()=>{const p=deferredInstall;if(!p)return;p.prompt();try{await p.userChoice;}catch{}deferredInstall=null;force(x=>x+1);};
+  const box={marginTop:16,padding:"12px 14px",background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.16)",borderRadius:12,color:"#fff",fontSize:13,lineHeight:1.6,textAlign:"left"} as const;
+  return(
+    <div style={box}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+        <b style={{fontSize:14}}>📲 홈 화면에 앱으로 추가하기</b>
+        <button onClick={off} style={{background:"none",border:"none",color:"rgba(255,255,255,0.55)",fontSize:12,cursor:"pointer",padding:4}}>다시 보지 않기</button>
+      </div>
+      {inApp?(
+        <p style={{margin:"6px 0 0",color:"rgba(255,255,255,0.8)"}}>카카오톡 등 앱 안에서 열린 화면에서는 추가가 안 돼요. 오른쪽 위(또는 아래) 메뉴에서 <b>{ios?"Safari로 열기":"다른 브라우저로 열기(크롬)"}</b>를 누른 뒤 다시 해 주세요.</p>
+      ):android&&deferredInstall?(
+        <button onClick={install} style={{marginTop:8,width:"100%",padding:"10px",borderRadius:8,border:"none",background:"#3b82f6",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer"}}>앱 설치하기</button>
+      ):(
+        <>
+          {!open&&<button onClick={()=>setOpen(true)} style={{marginTop:6,background:"none",border:"none",color:"#93c5fd",fontSize:13,cursor:"pointer",padding:0}}>방법 보기 ›</button>}
+          {open&&(ios?(
+            <ol style={{margin:"6px 0 0",paddingLeft:18,color:"rgba(255,255,255,0.85)"}}>
+              <li><b>Safari</b>로 이 화면을 열어요</li>
+              <li>아래쪽 <b>공유 버튼</b>(네모에 위 화살표 ⬆︎)을 눌러요</li>
+              <li><b>홈 화면에 추가</b> → 오른쪽 위 <b>추가</b></li>
+              <li>홈 화면의 <b>BIAS 기록</b> 아이콘으로 열고, 처음 한 번 로그인해요</li>
+            </ol>
+          ):(
+            <ol style={{margin:"6px 0 0",paddingLeft:18,color:"rgba(255,255,255,0.85)"}}>
+              <li><b>크롬</b>으로 이 화면을 열어요</li>
+              <li>오른쪽 위 <b>점 3개(⋮)</b> 메뉴를 눌러요</li>
+              <li><b>앱 설치</b> 또는 <b>홈 화면에 추가</b>를 눌러요</li>
+            </ol>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function App(){
   const [screen,setScreen]=useState("login");
   const [user,setUser]=useState<any>(null);
@@ -1603,6 +1660,7 @@ export default function App(){
         </div>
         <button onClick={handleLogin} disabled={loading} style={{...btnPrimary,marginTop:8}}>{loading?"확인 중...":"로그인 / 가입"}</button>
         <p style={{fontSize:12,color:PC.textLight,textAlign:"center",marginTop:16}}>원장님은 마스터 비밀번호로 로그인하세요</p>
+        <InstallHint/>
       </div>
     </div>
   );
