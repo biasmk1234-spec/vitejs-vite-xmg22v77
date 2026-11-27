@@ -4,7 +4,7 @@ const SUPABASE_URL = "https://xivairsxhdzignniithm.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhpdmFpcnN4aGR6aWdubmlpdGhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0ODE0MzYsImV4cCI6MjA5NjA1NzQzNn0.C6oVIr2LVd_M3-O4tXeTis50ZA_sQ1UR5VpLQ90nrUk";
 const APP_TITLE = "BIAS 기록관리 시스템";
 const APP_SUBTITLE = "경찰 순환식 체력시험";
-const PASS_TIME_SEC = 280;
+const PASS_TIME_SEC = 280.9; // 4:40.9까지 PASS
 const HALF_PASS_TIME_SEC = 190;
 type MType="full"|"half";
 const typeOf=(h:any):MType=>h?.measure_type==="half"?"half":"full";
